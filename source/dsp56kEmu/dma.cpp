@@ -109,11 +109,16 @@ namespace dsp56k
 
 		m_dma.removeTriggerTarget(this);
 
+		const bool wasEnabled = bittest(m_dcr, De);
 		m_dcr = _controlRegister;
 
 		LOGDMA("DMA set DCR" << m_index << " = " << HEX(_controlRegister));
 
-		if (!bitvalue(m_dcr, De))
+		const bool enabled = bittest(m_dcr, De);
+		if(enabled != wasEnabled)
+			m_dma.notifyDeChanged(m_index, enabled);
+
+		if (!enabled)
 			return;
 
 		if(bitvalue(m_dcr, D3d))
@@ -771,7 +776,10 @@ namespace dsp56k
 	void DmaChannel::finishTransfer()
 	{
 		if(isDEClearedAfterTransfer())
+		{
 			m_dcr &= ~(1 << De);
+			m_dma.notifyDeChanged(m_index, false);
+		}
 
 		m_dma.clearActiveChannel(m_index);
 

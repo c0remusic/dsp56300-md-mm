@@ -1,6 +1,7 @@
 #pragma once
 
 #include <array>
+#include <functional>
 #include <vector>
 
 #include "types.h"
@@ -215,7 +216,23 @@ namespace dsp56k
 		void addTriggerTarget(DmaChannel* _channel);
 		void removeTriggerTarget(const DmaChannel* _channel);
 
+		// Observer for enable-bit (DE) transitions of any channel, whether from
+		// a DCR write or the automatic clear at the end of a transfer. Lets an
+		// external transport mirror a channel's active state instead of reading
+		// the register from another thread. Free when unset.
+		using DeChangedCallback = std::function<void(TWord _channel, bool _enabled)>;
+		void setDeChangedCallback(DeChangedCallback&& _callback)
+		{
+			m_deChanged = std::move(_callback);
+		}
+		void notifyDeChanged(const TWord _channel, const bool _enabled) const
+		{
+			if(m_deChanged)
+				m_deChanged(_channel, _enabled);
+		}
+
 	private:
+		DeChangedCallback m_deChanged;
 		TWord m_dstr;
 		std::array<DmaChannel, 6> m_channels;
 		std::array<TWord, 4> m_dor{};
