@@ -28,5 +28,16 @@ namespace dsp56k
 		// token is opaque and both calls are a no-op elsewhere. Restore with setCurrentThreadPriorityRaw.
 		static uint32_t getCurrentThreadPriorityRaw();
 		static void setCurrentThreadPriorityRaw(uint32_t _raw);
+
+		// Put the calling thread in the same scheduling band as the host's audio
+		// threads. On Windows it joins the MMCSS "Pro Audio" task, which DAWs
+		// such as Ableton Live use for their engine threads (priority 23-26);
+		// THREAD_PRIORITY_TIME_CRITICAL alone reaches only 15 in a normal
+		// priority class process. If MMCSS refuses (it caps the number of
+		// registered threads) or elsewhere, the thread gets Highest priority.
+		// Returns a token for leaveProAudioTask, which must run on the same
+		// thread before it exits so the MMCSS slot is released.
+		static void* joinProAudioTask();
+		static void leaveProAudioTask(void* _task);
 	};
 }

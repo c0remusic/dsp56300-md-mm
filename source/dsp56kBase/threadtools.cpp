@@ -249,4 +249,62 @@ namespace dsp56k
 		(void)_raw;
 #endif
 	}
+
+#ifdef _WIN32
+	namespace
+	{
+		// avrt.dll is loaded on demand so that nothing links against it.
+		using AvSetMmThreadCharacteristicsFunc = HANDLE (WINAPI*)(LPCWSTR, LPDWORD);
+		using AvRevertMmThreadCharacteristicsFunc = BOOL (WINAPI*)(HANDLE);
+
+		struct Avrt
+		{
+			AvSetMmThreadCharacteristicsFunc set = nullptr;
+			AvRevertMmThreadCharacteristicsFunc revert = nullptr;
+
+			Avrt()
+			{
+				if(const auto module = LoadLibraryW(L"avrt.dll"))
+				{
+					set = reinterpret_cast<AvSetMmThreadCharacteristicsFunc>(
+						reinterpret_cast<void*>(GetProcAddress(module, "AvSetMmThreadCharacteristicsW")));
+					revert = reinterpret_cast<AvRevertMmThreadCharacteristicsFunc>(
+						reinterpret_cast<void*>(GetProcAddress(module, "AvRevertMmThreadCharacteristics")));
+				}
+			}
+		};
+
+		const Avrt& avrt()
+		{
+			static const Avrt s_avrt;
+			return s_avrt;
+		}
+	}
+#endif
+
+	void* ThreadTools::joinProAudioTask()
+	{
+#ifdef _WIN32
+		const auto& api = avrt();
+		if(api.set)
+		{
+			DWORD taskIndex = 0;
+			if(const auto handle = api.set(L"Pro Audio", &taskIndex))
+				return handle;
+			LOG("Failed to join the MMCSS Pro Audio task, error " << GetLastError());
+		}
+#endif
+		setCurrentThreadPriority(ThreadPriority::Highest);
+		return nullptr;
+	}
+
+	void ThreadTools::leaveProAudioTask(void* _task)
+	{
+#ifdef _WIN32
+		if(_task && avrt().revert)
+			avrt().revert(_task);
+#else
+		(void)_task;
+#endif
+	}
 }
