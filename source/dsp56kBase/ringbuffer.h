@@ -231,8 +231,8 @@ namespace dsp56k
 		// (waitNotEmpty/waitNotFull) read these cross-thread, so plain counters race on weakly-ordered ARM -
 		// the compiler hoists the load out of the spin and it hangs (this is why the lock-free ring "did not
 		// work on aarch64"; it now does). Movability for std::vector<> use is preserved by the move ctor.
-		std::atomic<size_t>	m_writeCount;
-		std::atomic<size_t>	m_readCount;
+		alignas(64) std::atomic<size_t>	m_writeCount;
+		alignas(64) std::atomic<size_t>	m_readCount;
 
 		typedef std::conditional_t<Lock, SpscSemaphoreWithCount, NopSemaphore> Sem;
 
