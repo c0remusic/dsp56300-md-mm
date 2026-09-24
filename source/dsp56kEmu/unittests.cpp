@@ -1,5 +1,8 @@
 #include "unittests.h"
 
+#include <algorithm>
+#include <vector>
+
 namespace dsp56k
 {
 	static DefaultMemoryValidator g_defaultMemoryValidator;
@@ -93,6 +96,7 @@ namespace dsp56k
 		div();
 		dmac();
 		dmaAddressWrapping();
+		dmaDeObserver();
 		hdiTransmitCallbacks();
 		dmacMultiPrecision();
 		eor();
@@ -1720,6 +1724,96 @@ namespace dsp56k
 				dma.setDCR(0, 0);
 			});
 		}
+	}
+
+	void UnitTests::dmaDeObserver()
+	{
+		using Event = std::pair<TWord, bool>;
+
+		auto& dma = peripheralsX.getDMA();
+
+		std::vector<Event> events;
+		dma.setDeChangedCallback([&events](const TWord _channel, const bool _enabled)
+		{
+			events.emplace_back(_channel, _enabled);
+		});
+
+		// The callback captures a local, remove it even if a check throws
+		struct RemoveCallback
+		{
+			Dma& dma;
+			~RemoveCallback() { dma.setDeChangedCallback({}); }
+		} removeCallback{dma};
+
+		const auto eventsAre = [&events](const std::initializer_list<Event> _expected)
+		{
+			return events.size() == _expected.size() && std::equal(events.begin(), events.end(), _expected.begin());
+		};
+
+		constexpr TWord de = 1u << DmaChannel::De;
+
+		// Word transfer on request (DTM=1, clears DE at the end of the block):
+		// X:$10 without update to X:$20 with postincrement, requested by IRQA
+		constexpr TWord wordMode = (4u << DmaChannel::Dam0) | (5u << DmaChannel::Dam3) | (1u << DmaChannel::Dtm0);
+
+		dma.setDSR(2, 0x10);
+		dma.setDDR(2, 0x20);
+		dma.setDCO(2, 1);	// two words
+		dma.setDCR(2, wordMode | de);
+		verify(eventsAre({{2, true}}));
+
+		// Writing the same value again is not a transition
+		dma.setDCR(2, wordMode | de);
+		verify(eventsAre({{2, true}}));
+
+		// The first request moves one word, the second one ends the block and clears DE
+		verify(dma.trigger(DmaChannel::RequestSource::ExternalIRQA));
+		verify(eventsAre({{2, true}}));
+		verify(dma.trigger(DmaChannel::RequestSource::ExternalIRQA));
+		verify(eventsAre({{2, true}, {2, false}}));
+		verify((dma.getDCR(2) & de) == 0);
+
+		// A disabled channel ignores requests, and clearing an already clear DE reports nothing
+		dma.trigger(DmaChannel::RequestSource::ExternalIRQA);
+		dma.setDCR(2, 0);
+		verify(eventsAre({{2, true}, {2, false}}));
+
+		// Block transfer triggered by DE (DTM=3): it completes after a delay, then clears DE
+		constexpr TWord blockMode = (5u << DmaChannel::Dam0) | (5u << DmaChannel::Dam3) | (3u << DmaChannel::Dtm0);
+
+		const auto runPendingTransfer = [&]()
+		{
+			dsp.fastForward(64, 64);	// the four word block needs eight cycles
+			dma.exec();
+		};
+
+		events.clear();
+		dma.setDSR(3, 0x10);
+		dma.setDDR(3, 0x20);
+		dma.setDCO(3, 3);	// four words
+		dma.setDCR(3, blockMode | de);
+		verify(eventsAre({{3, true}}));
+		runPendingTransfer();
+		verify(eventsAre({{3, true}, {3, false}}));
+		verify((dma.getDCR(3) & de) == 0);
+
+		// Software clears DE while the block is pending. The block still completes,
+		// but the channel has already been reported as disabled
+		events.clear();
+		dma.setDCR(3, blockMode | de);
+		dma.setDCR(3, blockMode);
+		verify(eventsAre({{3, true}, {3, false}}));
+		runPendingTransfer();
+		verify(eventsAre({{3, true}, {3, false}}));
+
+		// Without a callback, transitions go nowhere
+		dma.setDeChangedCallback({});
+		dma.setDCR(3, blockMode | de);
+		runPendingTransfer();
+		verify(eventsAre({{3, true}, {3, false}}));
+
+		dma.setDCR(2, 0);
+		dma.setDCR(3, 0);
 	}
 
 	void UnitTests::merge()

@@ -775,7 +775,9 @@ namespace dsp56k
 
 	void DmaChannel::finishTransfer()
 	{
-		if(isDEClearedAfterTransfer())
+		// A delayed block transfer still completes after software cleared DE,
+		// which already reported the transition
+		if(isDEClearedAfterTransfer() && bittest(m_dcr, De))
 		{
 			m_dcr &= ~(1 << De);
 			m_dma.notifyDeChanged(m_index, false);

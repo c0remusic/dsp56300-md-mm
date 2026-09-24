@@ -220,6 +220,9 @@ namespace dsp56k
 		// a DCR write or the automatic clear at the end of a transfer. Lets an
 		// external transport mirror a channel's active state instead of reading
 		// the register from another thread. Free when unset.
+		// It runs on the thread that executes this DSP and reports transitions
+		// only: seed a mirror from getDCR() if a channel may already be enabled
+		// when the callback is set.
 		using DeChangedCallback = std::function<void(TWord _channel, bool _enabled)>;
 		void setDeChangedCallback(DeChangedCallback&& _callback)
 		{

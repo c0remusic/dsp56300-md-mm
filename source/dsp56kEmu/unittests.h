@@ -81,6 +81,7 @@ namespace  dsp56k
 
 		void dmac();
 		void dmaAddressWrapping();
+		void dmaDeObserver();
 		void hdiTransmitCallbacks();
 		void dmacMultiPrecision();
 		void eor();
