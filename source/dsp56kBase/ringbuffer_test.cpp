@@ -5,8 +5,10 @@
 #include <cstdint>
 #include <cstdlib>
 #include <iostream>
+#include <memory>
 #include <random>
 #include <thread>
+#include <vector>
 
 // Concurrency regression test for the blocking (Lock=true) RingBuffer, whose full/empty waits are backed
 // by dsp56k::Semaphore -> dsp56k::ConditionVariable. A deliberately tiny buffer + high volume + jittered
@@ -20,6 +22,39 @@ namespace
 {
 	constexpr uint32_t Capacity   = 8;			// tiny on purpose: producer/consumer ping-pong at the boundary
 	constexpr uint64_t TotalItems = 4'000'000;
+
+	template<typename T> bool isAligned(const T* _ptr)
+	{
+		return reinterpret_cast<uintptr_t>(_ptr) % alignof(T) == 0;
+	}
+
+	// Each counter has its own 64 byte cache line, which makes every ring, and every class holding one (DSP,
+	// HDI08, Audio...), 64 byte aligned. Heap allocations of such types rely on C++17 aligned new.
+	bool checkAlignment()
+	{
+		using LockedRing = dsp56k::RingBuffer<uint64_t, Capacity, true>;
+		using MovableRing = dsp56k::RingBuffer<uint32_t, 16, false>;
+		using HeapRing = dsp56k::RingBuffer<uint32_t, 16, false, false>;
+
+		static_assert(alignof(LockedRing) >= 64, "ring counters must not share a cache line");
+		static_assert(alignof(MovableRing) >= 64, "ring counters must not share a cache line");
+		static_assert(alignof(HeapRing) >= 64, "ring counters must not share a cache line");
+
+		const auto locked = std::make_unique<LockedRing>();
+		const auto heap = std::make_unique<HeapRing>();
+
+		// growing the vector moves the rings to new storage
+		std::vector<MovableRing> rings;
+		for(int i = 0; i < 5; ++i)
+			rings.emplace_back();
+
+		bool ok = isAligned(locked.get()) && isAligned(heap.get());
+		for(const auto& ring : rings)
+			ok = ok && isAligned(&ring);
+
+		std::cout << "  alignment: " << (ok ? "ok" : "MISALIGNED heap allocation") << std::endl;
+		return ok;
+	}
 
 	bool runOne(const char* const _name, const bool _jitterProducer, const bool _jitterConsumer)
 	{
@@ -112,7 +147,7 @@ int main()
 {
 	std::cout << "RingBuffer / ConditionVariable concurrency test (capacity " << Capacity << ")" << std::endl;
 
-	bool ok = true;
+	bool ok = checkAlignment();
 	ok = ok && runOne("consumer-slower", false, true);
 	ok = ok && runOne("producer-slower", true,  false);
 	ok = ok && runOne("both-jittered",   true,  true);
