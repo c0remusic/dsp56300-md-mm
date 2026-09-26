@@ -307,4 +307,75 @@ namespace dsp56k
 		(void)_task;
 #endif
 	}
+
+	bool ThreadTools::setCurrentThreadAffinity(const uint64_t _mask)
+	{
+		if(!_mask)
+			return false;
+#ifdef _WIN32
+		return SetThreadAffinityMask(GetCurrentThread(), static_cast<DWORD_PTR>(_mask)) != 0;
+#elif defined(__linux__)
+		cpu_set_t set;
+		CPU_ZERO(&set);
+		for(int i = 0; i < 64; ++i)
+		{
+			if(_mask & (uint64_t{1} << i))
+				CPU_SET(i, &set);
+		}
+		return pthread_setaffinity_np(pthread_self(), sizeof(set), &set) == 0;
+#else
+		return false;
+#endif
+	}
+
+	int ThreadTools::getCurrentCpu()
+	{
+#ifdef _WIN32
+		return static_cast<int>(GetCurrentProcessorNumber());
+#elif defined(__linux__)
+		return sched_getcpu();
+#else
+		return -1;
+#endif
+	}
+
+	bool ThreadTools::getCpuTopology(const int _cpu, uint64_t& _coreMask, uint64_t& _cacheMask)
+	{
+		_coreMask = _cacheMask = 0;
+#ifdef _WIN32
+		if(_cpu < 0 || _cpu >= 64)
+			return false;
+		DWORD size = 0;
+		GetLogicalProcessorInformationEx(RelationAll, nullptr, &size);
+		if(!size)
+			return false;
+		std::string buffer(size, '\0');
+		auto* const first = reinterpret_cast<SYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX*>(buffer.data());
+		if(!GetLogicalProcessorInformationEx(RelationAll, first, &size))
+			return false;
+		const auto bit = KAFFINITY{1} << _cpu;
+		uint32_t cacheLevel = 0;
+		for(DWORD offset = 0; offset < size;)
+		{
+			const auto* info = reinterpret_cast<const SYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX*>(buffer.data() + offset);
+			if(info->Relationship == RelationProcessorCore)
+			{
+				const auto& mask = info->Processor.GroupMask[0];
+				if(mask.Group == 0 && (mask.Mask & bit))
+					_coreMask = mask.Mask;
+			}
+			else if(info->Relationship == RelationCache && info->Cache.Level >= cacheLevel
+				&& info->Cache.GroupMask.Group == 0 && (info->Cache.GroupMask.Mask & bit))
+			{
+				cacheLevel = info->Cache.Level;
+				_cacheMask = info->Cache.GroupMask.Mask;
+			}
+			offset += info->Size;
+		}
+		return _coreMask && _cacheMask;
+#else
+		(void)_cpu;
+		return false;
+#endif
+	}
 }

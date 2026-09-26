@@ -39,5 +39,18 @@ namespace dsp56k
 		// thread before it exits so the MMCSS slot is released.
 		static void* joinProAudioTask();
 		static void leaveProAudioTask(void* _task);
+
+		// Restrict the calling thread to the logical CPUs in _mask (bit n = CPU n).
+		// Windows and Linux; returns false elsewhere or on failure.
+		static bool setCurrentThreadAffinity(uint64_t _mask);
+
+		// The logical CPU the calling thread runs on, -1 if unknown.
+		static int getCurrentCpu();
+
+		// For logical CPU _cpu: the logical CPUs of its physical core (SMT
+		// siblings included) and of its last-level cache domain (an AMD CCX, for
+		// example). Windows only (first 64 CPUs of processor group 0); returns
+		// false elsewhere.
+		static bool getCpuTopology(int _cpu, uint64_t& _coreMask, uint64_t& _cacheMask);
 	};
 }
