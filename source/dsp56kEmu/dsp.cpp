@@ -1397,6 +1397,90 @@ namespace dsp56k
 			injectInterrupt(m_pendingExternalInterrupts.pop_front());
 	}
 
+	void DSP::skipNopLoop(const TWord _perIteration, const TWord _maxDoIterations, const TWord _loopAddress) noexcept
+	{
+		// The iterations that follow change nothing but LC and the counters, so
+		// apply them at once, up to the first exit of the loop to the dispatcher
+		// at which it would act: the execUntilCycles target reached, a peripheral
+		// due or an interrupt pending. Anything else between two exits happens in
+		// the same thread and can only happen at an exit, so execution stays
+		// identical to running the iterations one by one.
+		if(m_interruptFunc != m_execPeripheralsFunc || !sr_test(SR_LF) || static_cast<TWord>(reg.la.var) != _loopAddress)
+			return;
+
+		// LC counts the iterations left, the current one included
+		const uint64_t lc = static_cast<TWord>(reg.lc.var);
+		if(lc <= 1)
+			return;
+
+		const uint64_t instructions = _perIteration & 0xff;
+		const uint64_t cycles = (_perIteration >> 8) & 0xff;
+
+		// Counters at the start of the current iteration, and the number of
+		// iterations j after which an exit would still find nothing to do
+		const uint64_t i0 = m_instructions - instructions;
+		const uint64_t c0 = m_cycles - cycles;
+		uint64_t quiet = lc;
+		const auto bound = [&quiet](const uint64_t _limit, const uint64_t _base, const uint64_t _step)
+		{
+			quiet = std::min(quiet, _limit > _base ? (_limit - _base - 1) / _step : 0);
+		};
+		bound(m_skipLimitCycles, c0, cycles);
+		bound(perif[0]->getTargetClock(), i0, instructions);
+		if(perif[0]->hasCycleDeadline())
+			bound(perif[0]->getTargetCycle(), c0, cycles);
+
+		// The last iteration leaves the loop: never skip it
+		uint64_t skip = lc - 1;
+
+		// Without a DO iteration limit the loop only exits at its end. With one,
+		// it exits after each iteration that leaves LC a multiple of the limit:
+		// the first of these that is not quiet ends the skip.
+		if(_maxDoIterations)
+		{
+			const uint64_t k = _maxDoIterations;
+			const uint64_t firstExit = ((lc - 1) % k) + 1;
+			const uint64_t stopExit = quiet < firstExit ? firstExit : firstExit + (quiet + 1 - firstExit + k - 1) / k * k;
+			skip = std::min(skip, stopExit - 1);
+		}
+
+		if(!skip)
+			return;
+
+		reg.lc.var = static_cast<int32_t>(lc - skip);
+		m_instructions += skip * instructions;
+		m_cycles += skip * cycles;
+	}
+
+	void DSP::skipPollLoop(const TWord _perIteration, const TWord _nextPC, const TWord _loopStart) noexcept
+	{
+		// While the peripherals keep their values, another iteration leaves
+		// exactly the state this one left. They keep them until an exit of the
+		// loop to the dispatcher that acts - the execUntilCycles target reached,
+		// a peripheral due, an interrupt pending - and the loop exits after each
+		// iteration: apply the iterations up to that exit at once.
+		if(_nextPC != _loopStart || m_interruptFunc != m_execPeripheralsFunc)
+			return;
+
+		const uint64_t instructions = _perIteration & 0xff;
+		const uint64_t cycles = (_perIteration >> 8) & 0xff;
+
+		// The exit after this iteration is at the current counters, each
+		// further one an iteration later. Count the quiet ones in a row.
+		uint64_t repeat = ~0ull;
+		const auto bound = [&repeat](const uint64_t _limit, const uint64_t _now, const uint64_t _step)
+		{
+			repeat = std::min(repeat, _limit > _now ? (_limit - _now - 1) / _step + 1 : 0);
+		};
+		bound(m_skipLimitCycles, m_cycles, cycles);
+		bound(perif[0]->getTargetClock(), m_instructions, instructions);
+		if(perif[0]->hasCycleDeadline())
+			bound(perif[0]->getTargetCycle(), m_cycles, cycles);
+
+		m_instructions += repeat * instructions;
+		m_cycles += repeat * cycles;
+	}
+
 	uint32_t DSP::calcOpcodeCycles(const TWord _pc) const
 	{
 		TWord opA;

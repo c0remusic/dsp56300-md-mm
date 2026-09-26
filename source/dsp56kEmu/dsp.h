@@ -98,6 +98,9 @@ namespace dsp56k
 		// set by terminate(), polled by the interpreter DO loop so that it can be left on shutdown
 		std::atomic<bool>				m_terminate{false};
 
+		// execUntilCycles target while it runs, 0 otherwise (skipNopLoop)
+		uint64_t						m_skipLimitCycles = 0;
+
 		TInterruptFunc					m_execPeripheralsFunc;
 
 		// these members are accessed via JIT asm code, keep them tightly together
@@ -214,16 +217,19 @@ namespace dsp56k
 
 			if constexpr(g_useJIT)
 			{
+				// NOP loops may skip up to the target (skipNopLoop)
+				m_skipLimitCycles = _targetCycles;
 				while(m_cycles < _targetCycles)
 				{
 					const TWord invalidPC = m_jit.getTrampoline().execUntilCycles(this, _targetCycles);
 					if(invalidPC == 0xffffffffu)
-						return;
+						break;
 
 					onInvalidPC(invalidPC);
 					if(invalidPC >= m_jitEntriesSize)
-						return;
+						break;
 				}
+				m_skipLimitCycles = 0;
 			}
 			else
 			{
@@ -479,6 +485,17 @@ namespace dsp56k
 			m_instructions += _instructions;
 			m_cycles += _cycles;
 		}
+
+		// Called by a JIT DO loop body that consists of NOPs only, at the start of
+		// each iteration it runs, once that iteration's counts have been added.
+		// _perIteration packs the instructions (bits 0-7) and cycles (bits 8-15)
+		// of one iteration, _loopAddress is the loop's last address (LA).
+		void skipNopLoop(TWord _perIteration, TWord _maxDoIterations, TWord _loopAddress) noexcept;
+
+		// Called by a JIT block that branches back to its own start and only
+		// polls peripherals, at the end of each iteration, with the PC that
+		// iteration left. _perIteration packs as for skipNopLoop.
+		void skipPollLoop(TWord _perIteration, TWord _nextPC, TWord _loopStart) noexcept;
 
 	private:
 

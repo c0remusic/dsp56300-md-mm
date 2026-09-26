@@ -11,6 +11,67 @@
 
 namespace dsp56k
 {
+	namespace
+	{
+		void callDSPSkipNopLoop(DSP* const _dsp, const TWord _perIteration, const TWord _maxDoIterations, const TWord _loopAddress)
+		{
+			_dsp->skipNopLoop(_perIteration, _maxDoIterations, _loopAddress);
+		}
+
+		void callDSPSkipPollLoop(DSP* const _dsp, const TWord _perIteration, const TWord _nextPC, const TWord _loopStart)
+		{
+			_dsp->skipPollLoop(_perIteration, _nextPC, _loopStart);
+		}
+
+		// X peripheral registers whose reads have no side effect and whose values
+		// only change at peripheral events: the DMA registers, and the GPIO data
+		// registers of ports C and D
+		bool isPollablePeripheral(const TWord _addr)
+		{
+			return (_addr >= XIO_DCR5 && _addr <= XIO_DSTR) || _addr == 0xffffbd || _addr == 0xffffad;
+		}
+
+		// An instruction a polling loop may contain: reads of pollable peripherals
+		// and ALU operations on registers, the last one a conditional branch
+		bool isPollInstruction(const Instruction _instA, const Instruction _instB, const TWord _opA, const bool _last)
+		{
+			if(_last)
+				return (_instA == Bcc_xxx || _instA == Bcc_xxxx || _instA == Jcc_xxx) && _instB == Invalid;
+
+			switch(_instA)
+			{
+			case Nop:
+				return true;
+			case Movep_Spp:
+				return !getFieldValue<Movep_Spp, Field_W>(_opA) && !getFieldValue<Movep_Spp, Field_s>(_opA)
+					&& isPollablePeripheral(getFieldValue<Movep_Spp, Field_pppppp>(_opA) + 0xffffc0);
+			case Movep_SXqq:
+				return !getFieldValue<Movep_SXqq, Field_W>(_opA)
+					&& isPollablePeripheral(getFieldValue<Movep_SXqq, Field_q, Field_qqqqq>(_opA) + 0xffff80);
+			case Abs:
+			case Add_SD:	case Add_xx:	case Add_xxxx:
+			case And_SD:	case And_xx:	case And_xxxx:
+			case Asl_D:		case Asl_ii:	case Asl_S1S2D:
+			case Asr_D:		case Asr_ii:	case Asr_S1S2D:
+			case Clr:
+			case Cmp_S1S2:	case Cmp_xxS2:	case Cmp_xxxxS2:
+			case Cmpm_S1S2:	case Cmpu_S1S2:
+			case Eor_SD:	case Eor_xx:	case Eor_xxxx:
+			case Lsl_D:		case Lsl_ii:	case Lsl_SD:
+			case Lsr_D:		case Lsr_ii:	case Lsr_SD:
+			case Neg:
+			case Not:
+			case Or_SD:		case Or_xx:		case Or_xxxx:
+			case Sub_SD:	case Sub_xx:	case Sub_xxxx:
+			case Tfr:
+			case Tst:
+				return _instB == Invalid || _instB == Move_Nop || _instB == Ifcc || _instB == Ifcc_U;
+			default:
+				return false;
+			}
+		}
+	}
+
 	JitBlock::JitBlock(JitEmitter& _a, DSP& _dsp, JitRuntimeData& _runtimeData, JitConfig&& _config)
 	: m_runtimeData(_runtimeData)
 	, m_asm(_a)
@@ -305,6 +366,40 @@ namespace dsp56k
 
 		const auto pcNext = _pc + info.memSize;
 
+		// A DO loop body made of NOPs only (a delay loop) skips its iterations up to
+		// the next exit that matters, see DSP::skipNopLoop. The call runs at each
+		// iteration start, after the instruction and cycle counts inserted at
+		// loopBegin, before any DSP register is loaded.
+		if(fastInterruptMode == JitOps::FastInterruptMode::None
+			&& info.hasFlag(JitBlockInfo::Flags::IsLoopBodyBegin)
+			&& info.terminationReason == JitBlockInfo::TerminationReason::LoopEnd
+			&& info.instructionCount == info.memSize && info.cycleCount < 256)
+		{
+			bool nopsOnly = true;
+			for(TWord i = 0; i < info.memSize && nopsOnly; ++i)
+			{
+				TWord a, b;
+				m_dsp.memory().getOpcode(_pc + i, a, b);
+				nopsOnly = a == 0;
+			}
+
+			static const bool s_nopSkip = []{ const char* e = std::getenv("DSP_NOP_SKIP"); return !e || e[0] != '0'; }();
+			if(nopsOnly && s_nopSkip)
+			{
+				const FuncArg r0(*this, 0);
+				const FuncArg r1(*this, 1);
+				const FuncArg r2(*this, 2);
+				const FuncArg r3(*this, 3);
+
+				mem().makeDspPtr(r0);
+				m_asm.mov(r32(r1), asmjit::Imm(info.instructionCount | (info.cycleCount << 8)));
+				m_asm.mov(r32(r2), asmjit::Imm(m_config.maxDoIterations));
+				m_asm.mov(r32(r3), asmjit::Imm(pcNext - 1));
+
+				m_stack.call(asmjit::func_as_ptr(&callDSPSkipNopLoop));
+			}
+		}
+
 		if(fastInterruptMode != JitOps::FastInterruptMode::Static && info.terminationReason != JitBlockInfo::TerminationReason::PopPC)
 		{
 			if(info.branchTarget == g_invalidAddress || info.branchIsConditional)
@@ -348,6 +443,23 @@ namespace dsp56k
 		uint32_t& ccrOverwrite = info.ccrOverwrite;
 
 		_rt.m_encodedCycles = info.cycleCount;
+
+		// A block that branches back to its own start and only polls pollable
+		// peripherals skips its iterations up to the next exit that matters, see
+		// DSP::skipPollLoop. That needs each iteration to leave the same state:
+		// no register or CCR bit it reads before writing may be written by it.
+		static const bool s_pollSkip = []{ const char* e = std::getenv("DSP_POLL_SKIP"); return !e || e[0] != '0'; }();
+		bool pollLoop = s_pollSkip && fastInterruptMode == JitOps::FastInterruptMode::None
+			&& info.terminationReason == JitBlockInfo::TerminationReason::Branch
+			&& info.branchIsConditional && info.branchTarget == _pc
+			&& !info.hasFlag(JitBlockInfo::Flags::IsLoopBodyBegin)
+			&& !info.hasFlag(JitBlockInfo::Flags::ModeChange)
+			&& _loopEnds.find(pcNext) == _loopEnds.end()
+			&& info.instructionCount < 256 && info.cycleCount < 256;
+		auto pollRegsWritten = RegisterMask::None;
+		auto pollRegsLiveIn = RegisterMask::None;
+		uint32_t pollCcrWritten = 0;
+		uint32_t pollCcrLiveIn = 0;
 
 		TWord pMemSize = 0;
 
@@ -411,7 +523,27 @@ namespace dsp56k
 			}
 
 			blockFlags |= ops.getResultFlags();
-			
+
+			if(pollLoop)
+			{
+				Instruction instA, instB;
+				m_dsp.opcodes().getInstructionTypes(opA, instA, instB);
+				pollLoop = isPollInstruction(instA, instB, opA, pMemSize + ops.getOpSize() >= info.memSize);
+				if(pollLoop)
+				{
+					auto written = RegisterMask::None;
+					auto read = RegisterMask::None;
+					Opcodes::getRegisters(written, read, opA, instA, instB);
+					// getRegisters leaves out the destination of a peripheral read
+					if(instA == Movep_Spp || instA == Movep_SXqq)
+						written |= dsp56k::getRegisters(instA, Field_dddddd, opA);
+					pollRegsLiveIn |= static_cast<RegisterMask>(static_cast<uint64_t>(read) & ~static_cast<uint64_t>(pollRegsWritten));
+					pollRegsWritten |= written;
+					pollCcrLiveIn |= ops.getCCRRead() & ~pollCcrWritten;
+					pollCcrWritten |= ops.getCCRWritten();
+				}
+			}
+
 			_rt.m_singleOpWordA = opA;
 			_rt.m_singleOpWordB = opB;
 
@@ -429,6 +561,34 @@ namespace dsp56k
 		}
 
 		assert(_rt.getEncodedCycleCount() >= _rt.getEncodedInstructionCount());
+
+		if(pollLoop)
+		{
+			// CCR bits are checked per bit above; the rest of SR (the modes) must stay
+			constexpr auto sr = static_cast<uint64_t>(RegisterMask::SR | RegisterMask::PC);
+			const auto carried = static_cast<uint64_t>(pollRegsLiveIn) & static_cast<uint64_t>(pollRegsWritten) & ~sr;
+			const auto modes = static_cast<uint64_t>(pollRegsWritten) & static_cast<uint64_t>(RegisterMask::EMR | RegisterMask::MR | RegisterMask::OMR);
+			pollLoop = !carried && !modes && !(pollCcrLiveIn & pollCcrWritten);
+		}
+
+		if(pollLoop)
+		{
+			const auto pc = r32(m_dspRegPool.get(PoolReg::DspPC, true, false));
+
+			const FuncArg r0(*this, 0);
+			const FuncArg r1(*this, 1);
+			const FuncArg r2(*this, 2);
+			const FuncArg r3(*this, 3);
+
+			// The PC first: it may live in one of the other argument registers
+			if(r32(r2) != pc)
+				m_asm.mov(r32(r2), pc);
+			mem().makeDspPtr(r0);
+			m_asm.mov(r32(r1), asmjit::Imm(_rt.getEncodedInstructionCount() | (_rt.getEncodedCycleCount() << 8)));
+			m_asm.mov(r32(r3), asmjit::Imm(_pc));
+
+			m_stack.call(asmjit::func_as_ptr(&callDSPSkipPollLoop));
+		}
 
 		if (info.terminationReason == JitBlockInfo::TerminationReason::PopPC)
 			blockFlags |= JitOps::PopPC;
