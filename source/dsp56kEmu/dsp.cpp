@@ -1420,10 +1420,18 @@ namespace dsp56k
 		// iterations j after which an exit would still find nothing to do
 		const uint64_t i0 = m_instructions - instructions;
 		const uint64_t c0 = m_cycles - cycles;
+		// This runs for every iteration that enters the block: keep divisions out
+		// of the common single-NOP case
 		uint64_t quiet = lc;
 		const auto bound = [&quiet](const uint64_t _limit, const uint64_t _base, const uint64_t _step)
 		{
-			quiet = std::min(quiet, _limit > _base ? (_limit - _base - 1) / _step : 0);
+			if(_limit <= _base)
+			{
+				quiet = 0;
+				return;
+			}
+			const uint64_t room = _limit - _base - 1;
+			quiet = std::min(quiet, _step == 1 ? room : room / _step);
 		};
 		bound(m_skipLimitCycles, c0, cycles);
 		bound(perif[0]->getTargetClock(), i0, instructions);
@@ -1435,12 +1443,13 @@ namespace dsp56k
 
 		// Without a DO iteration limit the loop only exits at its end. With one,
 		// it exits after each iteration that leaves LC a multiple of the limit:
-		// the first of these that is not quiet ends the skip.
+		// the first of these that is not quiet ends the skip. The limit is a
+		// power of two (JitConfig::maxDoIterations).
 		if(_maxDoIterations)
 		{
-			const uint64_t k = _maxDoIterations;
-			const uint64_t firstExit = ((lc - 1) % k) + 1;
-			const uint64_t stopExit = quiet < firstExit ? firstExit : firstExit + (quiet + 1 - firstExit + k - 1) / k * k;
+			const uint64_t mask = _maxDoIterations - 1;
+			const uint64_t firstExit = ((lc - 1) & mask) + 1;
+			const uint64_t stopExit = quiet < firstExit ? firstExit : firstExit + ((quiet + 1 - firstExit + mask) & ~mask);
 			skip = std::min(skip, stopExit - 1);
 		}
 

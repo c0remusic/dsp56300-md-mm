@@ -383,7 +383,9 @@ namespace dsp56k
 		const auto hdiDelay = m_hi08.exec();
 		const auto timerDelay = m_timers.exec();
 		const auto dmaDelay = m_dma.exec();
-		const auto delay = std::min({essiDelay, hdiDelay, timerDelay, dmaDelay});
+		// Pairwise: the initializer-list overload goes through a vectorized
+		// min_element dispatch that costs more than the four compares
+		const auto delay = std::min(std::min(essiDelay, hdiDelay), std::min(timerDelay, dmaDelay));
 		return delay;
 	}
 
