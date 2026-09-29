@@ -48,18 +48,22 @@ namespace dsp56k
 
 	void dspExecDefaultPreventInterrupt(DSP* _dsp) noexcept
 	{
+		DSP_PROBE_COUNT(++_dsp->probeCounters().checks[2]);
 		_dsp->execDefaultPreventInterrupt();
 	}
-	void dspExecNop(DSP*) noexcept
+	void dspExecNop([[maybe_unused]] DSP* _dsp) noexcept
 	{
+		DSP_PROBE_COUNT(++_dsp->probeCounters().checks[3]);
 	}
 	void dspExecInterrupts(DSP* _dsp) noexcept
 	{
+		DSP_PROBE_COUNT(++_dsp->probeCounters().checks[1]);
 		_dsp->execInterrupts();
 	}
 
 	template <typename Ta, typename Tb> void dspExecPeripherals(DSP* _dsp) noexcept
 	{
+		DSP_PROBE_COUNT(++_dsp->probeCounters().checks[0]);
 		_dsp->execPeriph<Ta, Tb>();
 	}
 
@@ -175,6 +179,7 @@ namespace dsp56k
 		// processing - freezing the DSP's clocks. Fall back to peripherals instead.
 		if(m_pendingInterrupts.empty())
 		{
+			DSP_PROBE_COUNT(++m_probeCounters.intrEmpty);
 			m_interruptFunc = m_execPeripheralsFunc;
 			m_execPeripheralsFunc(this);
 			return;
@@ -212,6 +217,7 @@ namespace dsp56k
 			// and never runs the peripherals. Re-checked every step; serviced the moment the IPL
 			// drops. (Latent since peripherals were gated behind interrupt servicing; exposed by
 			// the deterministic single-thread MD scheduler, which lands the injection at IPL 3.)
+			DSP_PROBE_COUNT(++m_probeCounters.intrMasked);
 			m_execPeripheralsFunc(this);
 			return;
 		}
@@ -227,6 +233,7 @@ namespace dsp56k
 
 	void DSP::execInterrupt(const TWord vba)
 	{
+		DSP_PROBE_SCOPE(1, Intr, m_probeId);
 		pcCurrentInstruction = vba;
 		m_processingMode = FastInterrupt;
 
@@ -1405,6 +1412,7 @@ namespace dsp56k
 		// due or an interrupt pending. Anything else between two exits happens in
 		// the same thread and can only happen at an exit, so execution stays
 		// identical to running the iterations one by one.
+		DSP_PROBE_COUNT(++m_probeCounters.nopCalls[probe::ownIndex(m_probeId)]);
 		if(m_interruptFunc != m_execPeripheralsFunc || !sr_test(SR_LF) || static_cast<TWord>(reg.la.var) != _loopAddress)
 			return;
 
@@ -1459,6 +1467,7 @@ namespace dsp56k
 		reg.lc.var = static_cast<int32_t>(lc - skip);
 		m_instructions += skip * instructions;
 		m_cycles += skip * cycles;
+		DSP_PROBE_COUNT(m_probeCounters.nopSkipped[probe::ownIndex(m_probeId)] += skip * cycles);
 	}
 
 	void DSP::skipPollLoop(const TWord _perIteration, const TWord _nextPC, const TWord _loopStart) noexcept
@@ -1468,6 +1477,7 @@ namespace dsp56k
 		// loop to the dispatcher that acts - the execUntilCycles target reached,
 		// a peripheral due, an interrupt pending - and the loop exits after each
 		// iteration: apply the iterations up to that exit at once.
+		DSP_PROBE_COUNT(++m_probeCounters.pollCalls[probe::ownIndex(m_probeId)]);
 		if(_nextPC != _loopStart || m_interruptFunc != m_execPeripheralsFunc)
 			return;
 
@@ -1488,6 +1498,7 @@ namespace dsp56k
 
 		m_instructions += repeat * instructions;
 		m_cycles += repeat * cycles;
+		DSP_PROBE_COUNT(if(repeat) { ++m_probeCounters.pollActed[probe::ownIndex(m_probeId)]; m_probeCounters.pollSkipped[probe::ownIndex(m_probeId)] += repeat * cycles; });
 	}
 
 	uint32_t DSP::calcOpcodeCycles(const TWord _pc) const

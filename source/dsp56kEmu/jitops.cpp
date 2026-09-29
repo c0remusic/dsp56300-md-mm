@@ -533,6 +533,7 @@ namespace dsp56k
 
 	void callDSPWait(DSP* const _dsp, const TWord op)
 	{
+		DSP_PROBE_SCOPE(1, Wait, _dsp->getProbeId());
 		_dsp->op_Wait(op);
 	}
 

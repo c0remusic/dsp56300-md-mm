@@ -13,6 +13,8 @@
 #include "jit.h"
 #include "jittypes.h"
 
+#include "dsp56kBase/tscprobe.h"
+
 #if 0
 #	define LOGJITPC(PC)		LOG(HEX(reinterpret_cast<uint64_t>(this)) << " exec @ " << HEX(PC))
 #else
@@ -336,6 +338,8 @@ namespace dsp56k
 
 		template<typename Ta, typename Tb> ASMJIT_NOINLINE void execPeripherals() noexcept
 		{
+			DSP_PROBE_COUNT(++m_probeCounters.periphDue);
+			DSP_PROBE_SCOPE(1, Periph, m_probeId);
 			// we do not have any Y peripherals that need processing atm
 			const auto delayA = static_cast<Ta*>(perif[0])->exec();
 //			const auto delayB = static_cast<Tb*>(perif[1])->exec();
@@ -1375,5 +1379,15 @@ namespace dsp56k
 	public:
 		void coreDump(std::stringstream& _dst);
 		void coreDump();
+
+#ifdef DSP56K_TSC_PROBES
+		// Diagnostic TSC probes (dsp56kBase/tscprobe.h)
+		probe::Counters&	probeCounters()					{ return m_probeCounters; }
+		uint32_t			getProbeId() const				{ return m_probeId; }
+		void				setProbeId(const uint32_t _id)	{ m_probeId = _id; }
+	private:
+		probe::Counters		m_probeCounters;
+		uint32_t			m_probeId = 0;
+#endif
 	};
 }

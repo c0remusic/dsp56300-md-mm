@@ -333,6 +333,7 @@ namespace dsp56k
 
 	JitBlockRuntimeData* JitBlockChain::emit(TWord _pc)
 	{
+		DSP_PROBE_SCOPE(1, Compile, m_jit.dsp().getProbeId());
 		auto* emitter = m_jit.acquireEmitter(_pc);
 
 //		m_logger->addFlags(asmjit::FormatFlags::kHexImms | /*asmjit::FormatFlags::kHexOffsets |*/ asmjit::FormatFlags::kMachineCode);

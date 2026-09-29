@@ -644,11 +644,14 @@ namespace dsp56k
 
 	TWord callDSPMemReadPeriph(DSP* const _dsp, const TWord _area, const TWord _offset, Instruction _inst)
 	{
+		// Counted, not timed: a timed scope would cost more than the read itself
+		DSP_PROBE_COUNT(probe::countMmioRead(_dsp->getProbeId(), _offset));
 		return _dsp->getPeriph(_area)->read(_offset | 0xff0000, _inst);
 	}
 
 	void callDSPMemWritePeriph(DSP* const _dsp, const TWord _area, const TWord _offset, const TWord _value)
 	{
+		DSP_PROBE_SCOPE(1, MmioWrite, _dsp->getProbeId());
 		_dsp->getPeriph(_area)->write(_offset | 0xff0000, _value);
 	}
 
