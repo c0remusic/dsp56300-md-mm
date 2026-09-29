@@ -98,7 +98,8 @@ namespace dsp56k
 		// set by terminate(), polled by the interpreter DO loop so that it can be left on shutdown
 		std::atomic<bool>				m_terminate{false};
 
-		// execUntilCycles target while it runs, 0 otherwise (skipNopLoop)
+		// Cycle up to which NOP and polling loops may skip: the execUntilCycles
+		// target while it runs, or setSkipLimitCycles, 0 otherwise
 		uint64_t						m_skipLimitCycles = 0;
 
 		TInterruptFunc					m_execPeripheralsFunc;
@@ -238,6 +239,15 @@ namespace dsp56k
 				while(m_cycles < _targetCycles);
 			}
 		}
+
+		// A host stepping blocks with exec() may let NOP and polling loops skip
+		// up to _limitCycles, exactly as execUntilCycles lets them skip up to its
+		// target. It must then act, between two blocks, only once m_cycles has
+		// reached the limit, apart from what the skips already stop at (a due
+		// peripheral, a pending interrupt). With 0, the default outside
+		// execUntilCycles, no skip crosses an exit to the dispatcher; clear the
+		// limit when done stepping.
+		void setSkipLimitCycles(const uint64_t _limitCycles) noexcept	{ m_skipLimitCycles = _limitCycles; }
 
 		ASMJIT_FORCE_INLINE void execInlinePeripheralCheck() noexcept
 		{
