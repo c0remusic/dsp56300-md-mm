@@ -25,10 +25,12 @@ namespace dsp56k
 
 		// X peripheral registers whose reads have no side effect and whose values
 		// only change at peripheral events: the DMA registers, and the GPIO data
-		// registers of ports C and D
+		// register of port C, whose host input source must keep to that too.
+		// Port D is left out: a host may derive its pins from the instruction
+		// counter (clock pins sampled as GPIO), which changes at every instruction.
 		bool isPollablePeripheral(const TWord _addr)
 		{
-			return (_addr >= XIO_DCR5 && _addr <= XIO_DSTR) || _addr == 0xffffbd || _addr == 0xffffad;
+			return (_addr >= XIO_DCR5 && _addr <= XIO_DSTR) || _addr == 0xffffbd;
 		}
 
 		// An instruction a polling loop may contain: reads of pollable peripherals
