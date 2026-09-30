@@ -47,6 +47,10 @@ namespace dsp56k::probe
 		Hdi08,			// level 2: HDI08 service
 		Timers,			// level 2: timers
 		Dma,			// level 2: DMA channels
+		EssiHostTx,		// level 2: an ESSI handing a transmitted frame to the host
+		EssiHostProbe,	// level 2: an ESSI asking the host whether a word is on the wire
+		EssiHostRx,		// level 2: an ESSI taking a received frame from the host
+		EssiDmaRequest,	// level 2: DMA transfers an ESSI slot requests
 		Calib,
 		CalibParent,
 		CatCount
@@ -56,7 +60,7 @@ namespace dsp56k::probe
 	{
 		static constexpr const char* names[CatCount] = {"outside", "park", "exec", "catchUp", "periph", "mmioWrite",
 			"intr", "compile", "invalidate", "modeCheck", "wait", "esxiClock", "essiTx0", "essiTx1", "essiRx0", "essiRx1",
-			"hdi08", "timers", "dma", "calib", "calibParent"};
+			"hdi08", "timers", "dma", "essiHostTx", "essiHostProbe", "essiHostRx", "essiDmaRequest", "calib", "calibParent"};
 		return _cat < CatCount ? names[_cat] : "?";
 	}
 

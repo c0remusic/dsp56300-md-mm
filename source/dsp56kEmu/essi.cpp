@@ -117,7 +117,10 @@ namespace dsp56k
 		{
 			m_txFrame.resize(txWordCount + 1);
 			DSP_PROBE_COUNT(++m_periph.getDSP().probeCounters().essiTxFrames[m_index]);
-			writeTXimpl(m_txFrame);
+			{
+				DSP_PROBE_SCOPE(2, EssiHostTx, m_periph.getDSP().getProbeId());
+				writeTXimpl(m_txFrame);
+			}
 			m_txFrame.clear();
 
 			m_txSlotCounter = 0;
@@ -156,7 +159,11 @@ namespace dsp56k
 		// existing bootstrap behavior until their first real word arrives.
 		if(m_fastLinkRx && m_rxDataAvailable)
 		{
-			const bool pending = m_rxDataAvailable();
+			bool pending;
+			{
+				DSP_PROBE_SCOPE(2, EssiHostProbe, m_periph.getDSP().getProbeId());
+				pending = m_rxDataAvailable();
+			}
 			DSP_PROBE_COUNT(if(!pending) ++m_periph.getDSP().probeCounters().essiRxIdle[m_index]);
 			if(m_onDemandRxWireSemantics)
 			{
@@ -591,7 +598,10 @@ namespace dsp56k
 			m_sr.set(RegSSISRbits::SSISR_ROE);
 
 		if (m_rxSlotCounter == 0)
+		{
+			DSP_PROBE_SCOPE(2, EssiHostRx, m_periph.getDSP().getProbeId());
 			readRXimpl(m_rxFrame);
+		}
 
 		if(m_rxSlotCounter < m_rxFrame.size())
 			m_rx = m_rxFrame[m_rxSlotCounter];
@@ -631,6 +641,7 @@ namespace dsp56k
 
 	void Essi::dmaTrigger(const uint32_t _trigger) const
 	{
+		DSP_PROBE_SCOPE(2, EssiDmaRequest, m_periph.getDSP().getProbeId());
 		constexpr auto off = static_cast<int32_t>(DmaChannel::RequestSource::Essi1TransmitData) - static_cast<int32_t>(DmaChannel::RequestSource::Essi0TransmitData);
 
 		m_periph.getDMA().trigger(static_cast<DmaChannel::RequestSource>(_trigger + m_index * off));
