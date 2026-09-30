@@ -264,7 +264,9 @@ namespace dsp56k
 
 			Avrt()
 			{
-				if(const auto module = LoadLibraryW(L"avrt.dll"))
+				// System32 only: a bare name would also search the host application's folder first.
+				// Windows 7 needs KB2533623 for this flag, without it the thread falls back to a priority.
+				if(const auto module = LoadLibraryExW(L"avrt.dll", nullptr, LOAD_LIBRARY_SEARCH_SYSTEM32))
 				{
 					set = reinterpret_cast<AvSetMmThreadCharacteristicsFunc>(
 						reinterpret_cast<void*>(GetProcAddress(module, "AvSetMmThreadCharacteristicsW")));
