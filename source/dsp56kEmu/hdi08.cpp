@@ -184,6 +184,7 @@ namespace dsp56k
 
 	uint32_t HDI08::exec() noexcept
 	{
+		DSP_PROBE_SCOPE(2, Hdi08, m_periph.getDSP().getProbeId());
 		pollHostCommandCompletion();
 
 		if (!bittest(m_hpcr, HPCR_HEN))

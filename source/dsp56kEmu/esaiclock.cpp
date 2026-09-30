@@ -17,6 +17,7 @@ namespace dsp56k
 
 	uint32_t EsxiClock::exec() noexcept
 	{
+		DSP_PROBE_SCOPE(2, EsxiClock, m_periph.getDSP().getProbeId());
 		auto scheduleDelay = [this](const uint32_t _delay)
 		{
 			m_nextCycleDeadline = _delay;

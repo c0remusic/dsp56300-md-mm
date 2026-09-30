@@ -31,13 +31,22 @@ namespace dsp56k::probe
 		Park,			// root: the worker waiting for a gate to open
 		Exec,			// root: execUntilCycles of the DSP a chunk runs; self = native JIT + dispatch
 		CatchUp,		// the other DSP run nested in a link delivery; self = its blocks + loop
-		Periph,			// execPeripherals: ESSI clocks, link/codec callbacks, HDI08, timers, DMA
+		Periph,			// execPeripherals: ESSI clocks, link/codec callbacks, HDI08, timers, DMA;
+						// at level 2 only what the categories below leave (delay reset, external interrupts)
 		MmioWrite,		// peripheral register writes from JIT code
 		Intr,			// interrupt dispatch, including the vector block's own execution
 		Compile,		// JIT block emission
 		Invalidate,		// JIT invalidation on P writes
 		ModeCheck,		// JIT mode switch check
 		Wait,			// WAIT
+		EsxiClock,		// level 2: serial clock scheduling, without the slots it runs
+		EssiTx0,		// level 2: an ESSI transmit slot, its frame callbacks included
+		EssiTx1,
+		EssiRx0,		// level 2: an ESSI receive slot, its frame callbacks included
+		EssiRx1,
+		Hdi08,			// level 2: HDI08 service
+		Timers,			// level 2: timers
+		Dma,			// level 2: DMA channels
 		Calib,
 		CalibParent,
 		CatCount
@@ -46,7 +55,8 @@ namespace dsp56k::probe
 	inline const char* catName(const uint32_t _cat)
 	{
 		static constexpr const char* names[CatCount] = {"outside", "park", "exec", "catchUp", "periph", "mmioWrite",
-			"intr", "compile", "invalidate", "modeCheck", "wait", "calib", "calibParent"};
+			"intr", "compile", "invalidate", "modeCheck", "wait", "esxiClock", "essiTx0", "essiTx1", "essiRx0", "essiRx1",
+			"hdi08", "timers", "dma", "calib", "calibParent"};
 		return _cat < CatCount ? names[_cat] : "?";
 	}
 
@@ -71,11 +81,15 @@ namespace dsp56k::probe
 		std::array<uint64_t, 2> pollCalls{};	// skipPollLoop calls [nested, own]
 		std::array<uint64_t, 2> pollActed{};	// calls that skipped anything
 		std::array<uint64_t, 2> pollSkipped{};	// cycles skipped
+		std::array<uint64_t, 2> essiTxSlots{};	// per ESSI: transmit slots past the clock gate and TE
+		std::array<uint64_t, 2> essiTxFrames{};	// frames handed to the host
+		std::array<uint64_t, 2> essiRxSlots{};	// receive slots past the clock gate and RE
+		std::array<uint64_t, 2> essiRxIdle{};	// of which found no word on the wire
 	};
 
 	struct Ctx
 	{
-		uint8_t level = 1;			// 0: roots only (Exec, CatchUp), 1: all timed scopes
+		uint8_t level = 1;			// 0: roots only (Exec, CatchUp), 1: the exec path, 2: also inside the peripherals
 		uint8_t curCat = Outside;
 		uint8_t curDsp = 0;
 		uint8_t rootDsp = 0;		// DSP of the open Exec root; any other DSP counts as nested
@@ -205,11 +219,14 @@ namespace dsp56k::probe
 }
 
 #define DSP_PROBE_SCOPE(_level, _cat, _dsp) ::dsp56k::probe::Scope dspProbeScope((_level), ::dsp56k::probe::_cat, (_dsp))
+// A category computed at run time, such as one per ESSI
+#define DSP_PROBE_SCOPE_CAT(_level, _cat, _dsp) ::dsp56k::probe::Scope dspProbeScope((_level), (_cat), (_dsp))
 #define DSP_PROBE_COUNT(_expr) _expr
 
 #else
 
 #define DSP_PROBE_SCOPE(_level, _cat, _dsp)
+#define DSP_PROBE_SCOPE_CAT(_level, _cat, _dsp)
 #define DSP_PROBE_COUNT(_expr)
 
 #endif

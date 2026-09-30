@@ -75,6 +75,7 @@ namespace dsp56k
 
 	void Essi::execTX()
 	{
+		DSP_PROBE_SCOPE_CAT(2, probe::EssiTx0 + m_index, m_periph.getDSP().getProbeId());
 		if(m_clockGate && !m_clockGate())
 			return;
 
@@ -82,6 +83,7 @@ namespace dsp56k
 
 		if(!tem)
 			return;
+		DSP_PROBE_COUNT(++m_periph.getDSP().probeCounters().essiTxSlots[m_index]);
 
 		// DSP56303 On-Demand mode (MOD=1, DC=0) does not generate a frame sync
 		// until every enabled TX register has fresh data. Keep TDE asserted and
@@ -114,6 +116,7 @@ namespace dsp56k
 		if (m_txSlotCounter > txWordCount)
 		{
 			m_txFrame.resize(txWordCount + 1);
+			DSP_PROBE_COUNT(++m_periph.getDSP().probeCounters().essiTxFrames[m_index]);
 			writeTXimpl(m_txFrame);
 			m_txFrame.clear();
 
@@ -139,6 +142,7 @@ namespace dsp56k
 
 	void Essi::execRX()
 	{
+		DSP_PROBE_SCOPE_CAT(2, probe::EssiRx0 + m_index, m_periph.getDSP().getProbeId());
 		if(m_clockGate && !m_clockGate())
 			return;
 
@@ -146,12 +150,14 @@ namespace dsp56k
 
 		if(!rem)
 			return;
+		DSP_PROBE_COUNT(++m_periph.getDSP().probeCounters().essiRxSlots[m_index]);
 		// A synchronous fast link has no receive edge without a transmitted word.
 		// Strict On-Demand receivers enforce that from reset; legacy users retain the
 		// existing bootstrap behavior until their first real word arrives.
 		if(m_fastLinkRx && m_rxDataAvailable)
 		{
 			const bool pending = m_rxDataAvailable();
+			DSP_PROBE_COUNT(if(!pending) ++m_periph.getDSP().probeCounters().essiRxIdle[m_index]);
 			if(m_onDemandRxWireSemantics)
 			{
 				if(!pending)
