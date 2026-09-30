@@ -75,6 +75,7 @@ namespace dsp56k
 
 	void Essi::execTX()
 	{
+		DSP_PROBE_SCOPE_CAT(2, probe::EssiTx0 + m_index, m_periph.getDSP().getProbeId());
 		if(m_clockGate && !m_clockGate())
 			return;
 
@@ -82,6 +83,7 @@ namespace dsp56k
 
 		if(!tem)
 			return;
+		DSP_PROBE_COUNT(++m_periph.getDSP().probeCounters().essiTxSlots[m_index]);
 
 		// DSP56303 On-Demand mode (MOD=1, DC=0) does not generate a frame sync
 		// until every enabled TX register has fresh data. Keep TDE asserted and
@@ -114,7 +116,11 @@ namespace dsp56k
 		if (m_txSlotCounter > txWordCount)
 		{
 			m_txFrame.resize(txWordCount + 1);
-			writeTXimpl(m_txFrame);
+			DSP_PROBE_COUNT(++m_periph.getDSP().probeCounters().essiTxFrames[m_index]);
+			{
+				DSP_PROBE_SCOPE(2, EssiHostTx, m_periph.getDSP().getProbeId());
+				writeTXimpl(m_txFrame);
+			}
 			m_txFrame.clear();
 
 			m_txSlotCounter = 0;
@@ -139,6 +145,7 @@ namespace dsp56k
 
 	void Essi::execRX()
 	{
+		DSP_PROBE_SCOPE_CAT(2, probe::EssiRx0 + m_index, m_periph.getDSP().getProbeId());
 		if(m_clockGate && !m_clockGate())
 			return;
 
@@ -146,12 +153,18 @@ namespace dsp56k
 
 		if(!rem)
 			return;
+		DSP_PROBE_COUNT(++m_periph.getDSP().probeCounters().essiRxSlots[m_index]);
 		// A synchronous fast link has no receive edge without a transmitted word.
 		// Strict On-Demand receivers enforce that from reset; legacy users retain the
 		// existing bootstrap behavior until their first real word arrives.
 		if(m_fastLinkRx && m_rxDataAvailable)
 		{
-			const bool pending = m_rxDataAvailable();
+			bool pending;
+			{
+				DSP_PROBE_SCOPE(2, EssiHostProbe, m_periph.getDSP().getProbeId());
+				pending = m_rxDataAvailable();
+			}
+			DSP_PROBE_COUNT(if(!pending) ++m_periph.getDSP().probeCounters().essiRxIdle[m_index]);
 			if(m_onDemandRxWireSemantics)
 			{
 				if(!pending)
@@ -585,7 +598,10 @@ namespace dsp56k
 			m_sr.set(RegSSISRbits::SSISR_ROE);
 
 		if (m_rxSlotCounter == 0)
+		{
+			DSP_PROBE_SCOPE(2, EssiHostRx, m_periph.getDSP().getProbeId());
 			readRXimpl(m_rxFrame);
+		}
 
 		if(m_rxSlotCounter < m_rxFrame.size())
 			m_rx = m_rxFrame[m_rxSlotCounter];
@@ -625,6 +641,7 @@ namespace dsp56k
 
 	void Essi::dmaTrigger(const uint32_t _trigger) const
 	{
+		DSP_PROBE_SCOPE(2, EssiDmaRequest, m_periph.getDSP().getProbeId());
 		constexpr auto off = static_cast<int32_t>(DmaChannel::RequestSource::Essi1TransmitData) - static_cast<int32_t>(DmaChannel::RequestSource::Essi0TransmitData);
 
 		m_periph.getDMA().trigger(static_cast<DmaChannel::RequestSource>(_trigger + m_index * off));

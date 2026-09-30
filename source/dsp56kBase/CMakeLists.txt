@@ -21,10 +21,17 @@ sharedaudiobuffer.h
 sharedaudioreducer.h
 threadtools.cpp threadtools.h
 trigger.cpp trigger.h
+tscprobe.h
 win8sync.cpp win8sync.h
 )
 
 target_sources(dsp56kBase PRIVATE ${SOURCES})
+
+# Diagnostic TSC probes in the JIT exec path (tscprobe.h). Off by default.
+option(DSP56K_TSC_PROBES "Build diagnostic TSC probes into the DSP exec path" OFF)
+if(DSP56K_TSC_PROBES)
+	target_compile_definitions(dsp56kBase PUBLIC DSP56K_TSC_PROBES)
+endif()
 source_group("source" FILES ${SOURCES})
 
 if(MSVC)

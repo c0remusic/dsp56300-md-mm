@@ -250,6 +250,7 @@ namespace dsp56k
 
 	void Jit::notifyProgramMemWrite(const TWord _offset)
 	{
+		DSP_PROBE_SCOPE(1, Invalidate, m_dsp.getProbeId());
 		for (auto& it : m_chains)
 			it.second->notifyPMemWrite(_offset, it.second.get() == m_currentChain);
 
@@ -363,6 +364,8 @@ namespace dsp56k
 
 	void Jit::checkModeChange() noexcept
 	{
+		DSP_PROBE_COUNT(++m_dsp.probeCounters().modeChecks);
+		DSP_PROBE_SCOPE(1, ModeCheck, m_dsp.getProbeId());
 		JitDspMode mode;
 
 		mode.initialize(dsp());

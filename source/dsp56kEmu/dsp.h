@@ -13,6 +13,8 @@
 #include "jit.h"
 #include "jittypes.h"
 
+#include "dsp56kBase/tscprobe.h"
+
 #if 0
 #	define LOGJITPC(PC)		LOG(HEX(reinterpret_cast<uint64_t>(this)) << " exec @ " << HEX(PC))
 #else
@@ -97,6 +99,14 @@ namespace dsp56k
 
 		// set by terminate(), polled by the interpreter DO loop so that it can be left on shutdown
 		std::atomic<bool>				m_terminate{false};
+
+		// Cycle up to which NOP and polling loops may skip: the execUntilCycles
+		// target while it runs, until requestExecExit, 0 otherwise
+		uint64_t						m_skipLimitCycles = 0;
+
+		// The running execUntilCycles returns once m_cycles has reached this,
+		// tested by its trampoline after every block; 0 after requestExecExit
+		uint64_t						m_execTargetCycles = 0;
 
 		TInterruptFunc					m_execPeripheralsFunc;
 
@@ -212,25 +222,41 @@ namespace dsp56k
 			if(m_cycles >= _targetCycles)
 				return;
 
+			m_execTargetCycles = _targetCycles;
+
 			if constexpr(g_useJIT)
 			{
-				while(m_cycles < _targetCycles)
+				// NOP loops may skip up to the target (skipNopLoop)
+				m_skipLimitCycles = _targetCycles;
+				while(m_cycles < m_execTargetCycles)
 				{
-					const TWord invalidPC = m_jit.getTrampoline().execUntilCycles(this, _targetCycles);
+					const TWord invalidPC = m_jit.getTrampoline().execUntilCycles(this);
 					if(invalidPC == 0xffffffffu)
-						return;
+						break;
 
 					onInvalidPC(invalidPC);
 					if(invalidPC >= m_jitEntriesSize)
-						return;
+						break;
 				}
+				m_skipLimitCycles = 0;
 			}
 			else
 			{
 				do
 					execInterpreter();
-				while(m_cycles < _targetCycles);
+				while(m_cycles < m_execTargetCycles);
 			}
+		}
+
+		// From a callback of the block in progress, such as a peripheral
+		// write: the running execUntilCycles returns once that block has
+		// completed, where a host stepping blocks with exec() would regain
+		// control, and no NOP or polling loop skips past that point. Without
+		// a running execUntilCycles it has no effect.
+		void requestExecExit() noexcept
+		{
+			m_execTargetCycles = 0;
+			m_skipLimitCycles = 0;
 		}
 
 		ASMJIT_FORCE_INLINE void execInlinePeripheralCheck() noexcept
@@ -320,6 +346,8 @@ namespace dsp56k
 
 		template<typename Ta, typename Tb> ASMJIT_NOINLINE void execPeripherals() noexcept
 		{
+			DSP_PROBE_COUNT(++m_probeCounters.periphDue);
+			DSP_PROBE_SCOPE(1, Periph, m_probeId);
 			// we do not have any Y peripherals that need processing atm
 			const auto delayA = static_cast<Ta*>(perif[0])->exec();
 //			const auto delayB = static_cast<Tb*>(perif[1])->exec();
@@ -356,6 +384,7 @@ namespace dsp56k
 
 		const uint64_t&		getInstructionCounter		() const	{ return m_instructions; }
 		const uint64_t&		getCycles					() const	{ return m_cycles; }
+		const uint64_t&		getExecTargetCycles			() const	{ return m_execTargetCycles; }
 
 		// Cooperative WAIT bound for a single-thread scheduler hosting multiple DSPs. When non-zero,
 		// op_Wait returns control after burning this many instructions without an interrupt, so a
@@ -479,6 +508,17 @@ namespace dsp56k
 			m_instructions += _instructions;
 			m_cycles += _cycles;
 		}
+
+		// Called by a JIT DO loop body that consists of NOPs only, at the start of
+		// each iteration it runs, once that iteration's counts have been added.
+		// _perIteration packs the instructions (bits 0-7) and cycles (bits 8-15)
+		// of one iteration, _loopAddress is the loop's last address (LA).
+		void skipNopLoop(TWord _perIteration, TWord _maxDoIterations, TWord _loopAddress) noexcept;
+
+		// Called by a JIT block that branches back to its own start and only
+		// polls peripherals, at the end of each iteration, with the PC that
+		// iteration left. _perIteration packs as for skipNopLoop.
+		void skipPollLoop(TWord _perIteration, TWord _nextPC, TWord _loopStart) noexcept;
 
 	private:
 
@@ -1348,5 +1388,15 @@ namespace dsp56k
 	public:
 		void coreDump(std::stringstream& _dst);
 		void coreDump();
+
+#ifdef DSP56K_TSC_PROBES
+		// Diagnostic TSC probes (dsp56kBase/tscprobe.h)
+		probe::Counters&	probeCounters()					{ return m_probeCounters; }
+		uint32_t			getProbeId() const				{ return m_probeId; }
+		void				setProbeId(const uint32_t _id)	{ m_probeId = _id; }
+	private:
+		probe::Counters		m_probeCounters;
+		uint32_t			m_probeId = 0;
+#endif
 	};
 }

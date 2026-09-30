@@ -8,6 +8,7 @@ namespace dsp56k
 {
 	uint32_t Timers::exec() noexcept
 	{
+		DSP_PROBE_SCOPE(2, Timers, m_peripherals.getDSP().getProbeId());
 		// Prescaler Counter
 		// The prescaler counter is a 21-bit counter that is decremented on the rising edge of the prescaler input clock.
 		// The counter is enabled when at least one of the three timers is enabled (i.e., one or more of the timer enable

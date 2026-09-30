@@ -533,6 +533,7 @@ namespace dsp56k
 
 	void callDSPWait(DSP* const _dsp, const TWord op)
 	{
+		DSP_PROBE_SCOPE(1, Wait, _dsp->getProbeId());
 		_dsp->op_Wait(op);
 	}
 
@@ -737,11 +738,6 @@ namespace dsp56k
 		}
 	}
 
-	void callDSPPflush(DSP* const _dsp, const TWord op)
-	{
-		_dsp->op_Pflush(op);
-	}
-
 	void callDSPPflushun(DSP* const _dsp, const TWord op)
 	{
 		_dsp->op_Pflushun(op);
@@ -757,9 +753,13 @@ namespace dsp56k
 		_dsp->cachePlock(ea);
 	}
 
-	void JitOps::op_Pflush(TWord op)
+	void JitOps::op_Pflush(TWord)
 	{
-		callDSPFunc(&callDSPPflush, op);
+		// The instruction cache is not modelled: nothing reads its state
+		// (InstructionCache::fetch is never called, instruction fetches read P
+		// memory directly), so flushing it has no effect. The call rewrote all
+		// eight sectors, about 1.1 us per PFLUSH, which the Monomachine firmware
+		// executes some 10k times per second on each DSP.
 	}
 
 	void JitOps::op_Pflushun(TWord op)
