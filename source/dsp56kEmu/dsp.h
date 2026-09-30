@@ -101,8 +101,12 @@ namespace dsp56k
 		std::atomic<bool>				m_terminate{false};
 
 		// Cycle up to which NOP and polling loops may skip: the execUntilCycles
-		// target while it runs, or setSkipLimitCycles, 0 otherwise
+		// target while it runs, until requestExecExit, 0 otherwise
 		uint64_t						m_skipLimitCycles = 0;
+
+		// The running execUntilCycles returns once m_cycles has reached this,
+		// tested by its trampoline after every block; 0 after requestExecExit
+		uint64_t						m_execTargetCycles = 0;
 
 		TInterruptFunc					m_execPeripheralsFunc;
 
@@ -218,13 +222,15 @@ namespace dsp56k
 			if(m_cycles >= _targetCycles)
 				return;
 
+			m_execTargetCycles = _targetCycles;
+
 			if constexpr(g_useJIT)
 			{
 				// NOP loops may skip up to the target (skipNopLoop)
 				m_skipLimitCycles = _targetCycles;
-				while(m_cycles < _targetCycles)
+				while(m_cycles < m_execTargetCycles)
 				{
-					const TWord invalidPC = m_jit.getTrampoline().execUntilCycles(this, _targetCycles);
+					const TWord invalidPC = m_jit.getTrampoline().execUntilCycles(this);
 					if(invalidPC == 0xffffffffu)
 						break;
 
@@ -238,18 +244,20 @@ namespace dsp56k
 			{
 				do
 					execInterpreter();
-				while(m_cycles < _targetCycles);
+				while(m_cycles < m_execTargetCycles);
 			}
 		}
 
-		// A host stepping blocks with exec() may let NOP and polling loops skip
-		// up to _limitCycles, exactly as execUntilCycles lets them skip up to its
-		// target. It must then act, between two blocks, only once m_cycles has
-		// reached the limit, apart from what the skips already stop at (a due
-		// peripheral, a pending interrupt). With 0, the default outside
-		// execUntilCycles, no skip crosses an exit to the dispatcher; clear the
-		// limit when done stepping.
-		void setSkipLimitCycles(const uint64_t _limitCycles) noexcept	{ m_skipLimitCycles = _limitCycles; }
+		// From a callback of the block in progress, such as a peripheral
+		// write: the running execUntilCycles returns once that block has
+		// completed, where a host stepping blocks with exec() would regain
+		// control, and no NOP or polling loop skips past that point. Without
+		// a running execUntilCycles it has no effect.
+		void requestExecExit() noexcept
+		{
+			m_execTargetCycles = 0;
+			m_skipLimitCycles = 0;
+		}
 
 		ASMJIT_FORCE_INLINE void execInlinePeripheralCheck() noexcept
 		{
@@ -376,6 +384,7 @@ namespace dsp56k
 
 		const uint64_t&		getInstructionCounter		() const	{ return m_instructions; }
 		const uint64_t&		getCycles					() const	{ return m_cycles; }
+		const uint64_t&		getExecTargetCycles			() const	{ return m_execTargetCycles; }
 
 		// Cooperative WAIT bound for a single-thread scheduler hosting multiple DSPs. When non-zero,
 		// op_Wait returns control after burning this many instructions without an interrupt, so a

@@ -257,7 +257,6 @@ namespace dsp56k
 
 #ifdef HAVE_ARM64
 		m_asm.push(r64(g_ptrDSP));
-		m_asm.push(r64(g_counter));
 		m_asm.push(r64(regDspPtr));
 		m_asm.push(r64(g_ptrJitEntries));
 		m_asm.push(r64(g_ptrInterruptFunc));
@@ -277,23 +276,19 @@ namespace dsp56k
 		static constexpr uint32_t g_shadow = 0;
 #endif
 		static constexpr uint32_t g_slotDsp = g_shadow;
-		static constexpr uint32_t g_slotTarget = g_shadow + 8;
 		static constexpr int g_pushCount = static_cast<int>(std::size(g_trampolineSavedGPs)) + 1;
-		static constexpr int g_slotBytes = static_cast<int>(g_shadow) + 16;
+		static constexpr int g_slotBytes = static_cast<int>(g_shadow) + 8;
 		static constexpr uint32_t g_stackSize = static_cast<uint32_t>(g_slotBytes + (((8 - 8*g_pushCount - g_slotBytes) % 16 + 16) % 16));
 		static_assert(((8 - 8*g_pushCount - static_cast<int>(g_stackSize)) % 16) == 0, "rsp must be 16 byte aligned at the call");
 		m_asm.sub(asmjit::x86::regs::rsp, asmjit::Imm(g_stackSize));
 #endif
 
 		const auto argDspPtr = r64(g_funcArgGPs[0]);
-		const auto argTargetCycles = r64(g_funcArgGPs[1]);
 
 #ifdef HAVE_ARM64
 		m_asm.mov(r64(g_ptrDSP), argDspPtr);
-		m_asm.mov(r64(g_counter), argTargetCycles);
 #else
 		m_asm.mov(asmjit::x86::ptr(asmjit::x86::regs::rsp, g_slotDsp, 8), argDspPtr);
-		m_asm.mov(asmjit::x86::ptr(asmjit::x86::regs::rsp, g_slotTarget, 8), argTargetCycles);
 #endif
 
 		m_asm.lea_(g_ptrJitEntries   , argDspPtr, &m_dsp.getJitEntries(), &m_dsp);
@@ -333,8 +328,11 @@ namespace dsp56k
 		m_asm.mov(r64(g_funcArgGPs[0]), regDspPtr);
 		m_asm.blr(g_funcToCall);
 
+		// The target is read at every block: a callback of the block may have
+		// cleared it (DSP::requestExecExit)
 		m_asm.ldr(r64(g_funcArgGPs[0]), Jitmem::makePtr(g_ptrCycles, 8));
-		m_asm.cmp(r64(g_funcArgGPs[0]), r64(g_counter));
+		m_asm.ldr(r64(g_funcArgGPs[1]), Jitmem::makeRelativePtr(&m_dsp.getExecTargetCycles(), &m_dsp, g_ptrDSP, 8));
+		m_asm.cmp(r64(g_funcArgGPs[0]), r64(g_funcArgGPs[1]));
 		m_asm.b(asmjit::arm::CondCode::kLO, label);
 #else
 		const auto dsp = asmjit::x86::rax;
@@ -354,9 +352,11 @@ namespace dsp56k
 		m_asm.mov(r64(g_funcArgGPs[0]), regDspPtr);
 		m_asm.call(g_funcToCall);
 
+		// The target is read at every block: a callback of the block may have
+		// cleared it (DSP::requestExecExit)
 		m_asm.mov(dsp, asmjit::x86::ptr(asmjit::x86::regs::rsp, g_slotDsp, 8));
-		m_asm.mov(scratchA, asmjit::x86::ptr(asmjit::x86::regs::rsp, g_slotTarget, 8));
-		m_asm.cmp(Jitmem::makeRelativePtr(&m_dsp.getCycles(), &m_dsp, dsp, 8), scratchA);
+		m_asm.mov(scratchA, Jitmem::makeRelativePtr(&m_dsp.getCycles(), &m_dsp, dsp, 8));
+		m_asm.cmp(scratchA, Jitmem::makeRelativePtr(&m_dsp.getExecTargetCycles(), &m_dsp, dsp, 8));
 		m_asm.jb(label);
 #endif
 
@@ -378,7 +378,6 @@ namespace dsp56k
 		m_asm.pop(r64(g_ptrInterruptFunc));
 		m_asm.pop(r64(g_ptrJitEntries));
 		m_asm.pop(r64(regDspPtr));
-		m_asm.pop(r64(g_counter));
 		m_asm.pop(r64(g_ptrDSP));
 #else
 		for (size_t i=std::size(g_trampolineSavedGPs); i-- > 0;)

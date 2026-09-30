@@ -68,6 +68,7 @@ namespace dsp56k
 
 		parallelMoveXY();
 		boundedDispatch();
+		execExitRequest();
 	}
 
 	void JitUnittests::runtimeUnnormalizedFlag()
@@ -271,6 +272,62 @@ namespace dsp56k
 		verify(dsp.getCycles() >= 32);
 		if(needsGrowth)
 			verify(dsp.getJitEntriesSize() > highPC);
+	}
+
+	void JitUnittests::execExitRequest()
+	{
+		// A HOTX write callback that requests the exit: execUntilCycles returns
+		// where a host stepping blocks with execJit() sees the write, far short
+		// of its target
+		constexpr TWord loopPC = 0x100;
+		TWord pc = loopPC;
+		pc = emitToMemory("nop", pc);
+		pc = emitToMemory("movep #>$123456,x:<<$ffffc7", pc);
+		pc = emitToMemory("nop", pc);
+		emitToMemory("bra >$100", pc);
+
+		auto& hdi08 = peripheralsX.getHDI08();
+
+		const auto run = [&](const bool _bounded)
+		{
+			dsp.resetHW();
+			dsp.setPC(loopPC);
+			peripheralsX.resetDelayCycles(0, IPeripherals::MaxDelayCycles);
+
+			bool written = false;
+			hdi08.setWriteTxCallback([&]
+			{
+				written = true;
+				if(_bounded)
+					dsp.requestExecExit();
+			});
+
+			if(_bounded)
+				dsp.execUntilCycles(dsp.getCycles() + 100000);
+			else
+			{
+				do
+					dsp.execJit();
+				while(!written);
+			}
+
+			hdi08.setWriteTxCallback({});
+			verify(written && hdi08.hasTX() && hdi08.readTX() == 0x123456);
+
+			return std::array<uint64_t, 3>{
+				dsp.getPC().toWord(), dsp.getInstructionCounter(), dsp.getCycles()};
+		};
+
+		const auto reference = run(false);
+		const auto bounded = run(true);
+		verify(bounded == reference);
+		verify(bounded[2] < 100000);
+
+		// The request holds for one run only
+		dsp.execUntilCycles(dsp.getCycles() + 16);
+		verify(dsp.getCycles() >= bounded[2] + 16);
+		while(hdi08.hasTX())
+			hdi08.readTX();
 	}
 
 	void JitUnittests::programMemoryInvalidation()
