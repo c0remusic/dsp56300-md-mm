@@ -128,13 +128,13 @@ namespace dsp56k
 	// _____________________________________________________________________________
 	// Peripherals
 	//
-	Peripherals56303::Peripherals56303()
+	Peripherals56303::Peripherals56303(const bool _audioRings/* = true*/)
 		: IPeripherals(PeripheralType::Peripherals56303)
 		, m_mem{}
 		, m_dma(*this)
 		, m_essiClock(*this)
-		, m_essi0(*this, 0)
-		, m_essi1(*this, 1)
+		, m_essi0(*this, 0, _audioRings)
+		, m_essi1(*this, 1, _audioRings)
 		, m_hi08(*this)
 		, m_timers(*this, Vba_TIMER0compare)
 	{

@@ -170,8 +170,9 @@ namespace dsp56k
 		// implementation
 		//
 	public:
-		Peripherals56303();
-		
+		// Without audio rings, the host reads and writes the ESSI frames through the callbacks of Audio only
+		explicit Peripherals56303(bool _audioRings = true);
+
 		TWord read(TWord _addr, Instruction _inst) override;
 		const TWord* readAsPtr(TWord _addr, Instruction _inst) override;
 		void write(TWord _addr, TWord _val) override;

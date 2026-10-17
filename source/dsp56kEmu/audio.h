@@ -7,6 +7,8 @@
 #include <cstring> // memcpy
 
 #include "dsp56kBase/fastmath.h"
+#include <memory>
+
 #include "dsp56kBase/ringbuffer.h"
 #include "utils.h"
 
@@ -135,7 +137,7 @@ namespace dsp56k
 		void writeEmptyAudioIn(const size_t _len)
 		{
 			for (size_t i = 0; i < _len; ++i)
-				m_audioInputs.push_back({});
+				m_audioInputs->push_back({});
 		}
 
 		template<typename T>
@@ -155,8 +157,8 @@ namespace dsp56k
 				if(_latency > m_latency)
 				{
 					// a latency increase on the input means to feed additional zeroes into it
-					m_audioInputs.waitNotFull();
-					m_audioInputs.push_back({});
+					m_audioInputs->waitNotFull();
+					m_audioInputs->push_back({});
 
 					++m_latency;
 				}
@@ -167,7 +169,7 @@ namespace dsp56k
 				}
 				else
 				{
-					m_audioInputs.emplace_back([&](RxFrame& _frame)
+					m_audioInputs->emplace_back([&](RxFrame& _frame)
 					{
 						_createRxFrame(s, _frame);
 					});
@@ -208,8 +210,8 @@ namespace dsp56k
 		{
 			for (uint32_t i = 0; i < _frames; ++i)
 			{
-				m_audioOutputs.waitNotEmpty();
-				m_audioOutputs.pop_front([&](TxFrame& _frame)
+				m_audioOutputs->waitNotEmpty();
+				m_audioOutputs->pop_front([&](TxFrame& _frame)
 				{
 					_readOutputCbk(i, _frame);
 				});
@@ -258,11 +260,12 @@ namespace dsp56k
 			});
 		}
 
-		const auto& getAudioInputs() const { return m_audioInputs; }
-		const auto& getAudioOutputs() const { return m_audioOutputs; }
+		// Only with ring buffers (hasRingBuffers)
+		const auto& getAudioInputs() const { return *m_audioInputs; }
+		const auto& getAudioOutputs() const { return *m_audioOutputs; }
 
-		auto& getAudioInputs() { return m_audioInputs; }
-		auto& getAudioOutputs() { return m_audioOutputs; }
+		auto& getAudioInputs() { return *m_audioInputs; }
+		auto& getAudioOutputs() { return *m_audioOutputs; }
 
 	public:
 		static constexpr uint32_t RingBufferSize = 8192 * 4;
@@ -287,8 +290,10 @@ namespace dsp56k
 
 		bool m_useRingBuffers;
 
-		RingBuffer<RxFrame, RingBufferSize, true, false> m_audioInputs;
-		RingBuffer<TxFrame, RingBufferSize, true, false> m_audioOutputs;
+		// The host's side of the audio, about 42 MB the pair: made only with ring buffers, so that a DSP whose host
+		// reads and writes its frames through callbacks does not carry them
+		std::unique_ptr<RingBuffer<RxFrame, RingBufferSize, true, false>> m_audioInputs;
+		std::unique_ptr<RingBuffer<TxFrame, RingBufferSize, true, false>> m_audioOutputs;
 		size_t m_latency = 0;
 
 		std::atomic<bool> m_terminated{false};
