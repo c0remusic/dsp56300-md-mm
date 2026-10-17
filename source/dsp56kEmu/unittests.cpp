@@ -89,6 +89,7 @@ namespace dsp56k
 		clr();
 		cmp();
 		cmpm();
+		cmpu();
 		dec();
 		div();
 		dmac();
@@ -166,6 +167,7 @@ namespace dsp56k
 
 		// newly implemented
 		eor_xx();
+		eor_xxxx();
 		ror_();
 
 		// bit-test jump/branch — peripheral addressing modes
@@ -4638,6 +4640,105 @@ namespace dsp56k
 		}, [&]()
 		{
 			verify((dsp.aluA().var & 0x00ffffff000000) == 0x00ffffc0000000);
+		});
+	}
+
+	void UnitTests::cmpu()
+	{
+		// Equal in 48 bits: Z, and neither C nor N
+		runTest([&]()
+		{
+			dsp.setALU(false, TReg56(static_cast<TReg56::MyType>(0x00123456000000)));
+			dsp.x0(0x123456);
+			dsp.setSR(0x080000);
+			emit("cmpu x0,a");
+		}, [&]()
+		{
+			verify(dsp.sr_test(CCR_Z));
+			verify(!dsp.sr_test(CCR_C));
+			verify(!dsp.sr_test(CCR_N));
+			verify(!dsp.sr_test(CCR_V));
+		});
+
+		// The source above the accumulator as unsigned 48 bit values: the borrow sets C, and N with it
+		runTest([&]()
+		{
+			dsp.setALU(false, TReg56(static_cast<TReg56::MyType>(0x00000001000000)));
+			dsp.x0(0xffffff);
+			dsp.setSR(0x080000);
+			emit("cmpu x0,a");
+		}, [&]()
+		{
+			verify(!dsp.sr_test(CCR_Z));
+			verify(dsp.sr_test(CCR_C));
+			verify(dsp.sr_test(CCR_N));
+			verify(!dsp.sr_test(CCR_V));
+		});
+
+		// Below it: no borrow, though $ffffff is negative as a signed value
+		runTest([&]()
+		{
+			dsp.setALU(true, TReg56(static_cast<TReg56::MyType>(0x00ffffff000000)));
+			dsp.y0(0x000001);
+			dsp.setSR(0x080003);
+			emit("cmpu y0,b");
+		}, [&]()
+		{
+			verify(!dsp.sr_test(CCR_Z));
+			verify(!dsp.sr_test(CCR_C));
+			verify(!dsp.sr_test(CCR_N));
+			verify(!dsp.sr_test(CCR_V));
+		});
+
+		// The extension takes no part
+		runTest([&]()
+		{
+			dsp.setALU(false, TReg56(static_cast<TReg56::MyType>(0xff000001000000)));
+			dsp.x1(0x000001);
+			emit("cmpu x1,a");
+		}, [&]()
+		{
+			verify(dsp.sr_test(CCR_Z));
+			verify(!dsp.sr_test(CCR_C));
+		});
+
+		// The other accumulator, all 48 bits of it
+		runTest([&]()
+		{
+			dsp.setALU(false, TReg56(static_cast<TReg56::MyType>(0x00123456000001)));
+			dsp.setALU(true, TReg56(static_cast<TReg56::MyType>(0x00123456000002)));
+			emit("cmpu b,a");
+		}, [&]()
+		{
+			verify(!dsp.sr_test(CCR_Z));
+			verify(dsp.sr_test(CCR_C));
+		});
+	}
+
+	void UnitTests::eor_xxxx()
+	{
+		// eor #xxxx,D (long immediate): A1 only, A2 and A0 kept
+		runTest([&]()
+		{
+			dsp.setALU(false, TReg56(static_cast<TReg56::MyType>(0x0f0f0f0f123456)));
+			emit("eor #>$123456,a");
+		}, [&]()
+		{
+			verify(dsp.aluA().var == 0x0f1d3b59123456);
+			verify(!dsp.sr_test(CCR_Z));
+			verify(!dsp.sr_test(CCR_V));
+		});
+
+		// Zero in A1: Z
+		runTest([&]()
+		{
+			dsp.setALU(true, TReg56(static_cast<TReg56::MyType>(0x00abcdef000000)));
+			emit("eor #>$abcdef,b");
+		}, [&]()
+		{
+			verify(dsp.aluB().var == 0);
+			verify(dsp.sr_test(CCR_Z));
+			verify(!dsp.sr_test(CCR_N));
 		});
 	}
 

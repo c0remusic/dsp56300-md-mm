@@ -76,6 +76,7 @@ namespace  dsp56k
 		void clr();
 		void cmp();
 		void cmpm();
+		void cmpu();
 		void dec();
 		void div();
 
@@ -152,6 +153,7 @@ namespace  dsp56k
 
 		// newly implemented
 		void eor_xx();
+		void eor_xxxx();
 		void ror_();
 
 		// bit-test jump/branch — peripheral addressing modes
