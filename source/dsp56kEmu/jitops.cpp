@@ -9,6 +9,11 @@
 #include "opcodecycles.h"
 
 #include "opcodes.h"
+#include "disasm.h"
+
+#include <cstdio>
+#include <mutex>
+#include <set>
 
 namespace dsp56k
 {
@@ -430,6 +435,21 @@ namespace dsp56k
 
 	void JitOps::errNotImplemented(TWord op)
 	{
+		// A release build emits nothing for the op: say so, once per address, so that a program that needs it is found
+		static std::set<TWord> reported;
+		static std::mutex mutex;
+		{
+			std::lock_guard lock(mutex);
+			if(reported.insert(m_pcCurrentOp).second && reported.size() <= 64)
+			{
+				Opcodes opcodes;
+				Disassembler disasm(opcodes);
+				std::string text;
+				disasm.disassemble(text, op, 0, 0, 0, m_pcCurrentOp);
+				std::fprintf(stderr, "[dsp56k JIT] instruction not implemented at P:$%06x: %06x %s\n", m_pcCurrentOp, op,
+					text.c_str());
+			}
+		}
 		assert(0 && "instruction not implemented");
 	}
 

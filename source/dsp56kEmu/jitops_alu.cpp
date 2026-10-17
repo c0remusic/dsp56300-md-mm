@@ -735,6 +735,49 @@ namespace dsp56k
 		alu_cmp(D, r64(r.get()), true);
 	}
 
+	void JitOps::op_Cmpu_S1S2(TWord op)
+	{
+		const auto D = getFieldValue<Cmpu_S1S2, Field_d>(op);
+		// ggg defines 0 (the other accumulator) and 4 to 7 (x0, y0, x1, y1), the encodings JJJ uses
+		const auto ggg = getFieldValue<Cmpu_S1S2, Field_ggg>(op);
+
+		// The batch below clears the dirty flags of every bit CMPU writes, and CMPU never becomes the last modifying
+		// ALU op: E and U stay lazy and are still evaluated from the previous result, "unchanged by the instruction".
+		const auto v = decode_JJJ_read_56(ggg, !D);
+
+		AluReg d(m_block, D, true);		// read only, CMPU stores no result
+
+		const RegGP s1(m_block);
+		m_asm.mov(r64(s1), r64(v.get()));
+
+		// Two 48 bit unsigned operands, the extension takes no part: shifted up so that bit 47 lands on bit 63,
+		// the host's borrow and zero describe the 48 bit result, and the bits below are zero.
+		constexpr auto shift = 16 - g_aluBitOffset;
+
+		m_asm.shl(r64(d.get()), asmjit::Imm(shift));
+		m_asm.shl(r64(s1), asmjit::Imm(shift));
+
+		{
+			// C, V, Z and N cleared up front, each OR'ed in below; V is always cleared
+			CcrBatchUpdate u(*this, static_cast<CCRMask>(CCR_C | CCR_V | CCR_Z | CCR_N));
+
+#ifdef HAVE_ARM64
+			m_asm.subs(r64(d.get()), r64(d.get()), r64(s1));
+			ccr_update_ifNotCarry(CCRB_C);	// on ARM carry means unsigned >=, unsigned < on the 56k and on Intel
+#else
+			m_asm.sub(r64(d.get()), r64(s1));
+			ccr_update_ifCarry(CCRB_C);
+#endif
+
+			m_asm.test_(r64(d.get()));
+			ccr_update_ifZero(CCRB_Z);		// "set if bits 47-0 of the result are 0"
+
+			// N is set with C, from the unsigned borrow (upstream dsp56300's reading of sim56300), so that the
+			// signed branches after a CMPU act as unsigned ones
+			copyBitToCCR(m_dspRegs.getSR(JitDspRegs::Read), CCRB_C, CCRB_N);
+		}
+	}
+
 	void JitOps::op_Dec(TWord op)
 	{
 		const auto ab = getFieldValue<Dec, Field_d>(op);
@@ -857,6 +900,15 @@ namespace dsp56k
 		const auto ab = getFieldValue<Eor_xx, Field_d>(op);
 		const auto xxxx = getFieldValue<Eor_xx, Field_iiiiii>(op);
 		DspValue r(m_block, xxxx, DspValue::Immediate24);
+		alu_eor(ab, r);
+	}
+
+	void JitOps::op_Eor_xxxx(TWord op)
+	{
+		const auto ab = getFieldValue<Eor_xxxx, Field_d>(op);
+
+		DspValue r(m_block);
+		getOpWordB(r);
 		alu_eor(ab, r);
 	}
 

@@ -799,7 +799,31 @@ namespace dsp56k
 	}
 	inline void DSP::op_Cmpu_S1S2(const TWord op)
 	{
-		errNotImplemented("CMPU");
+		const auto D = getFieldValue<Cmpu_S1S2, Field_d>(op);
+		// ggg defines 0 (the other accumulator) and 4 to 7 (x0, y0, x1, y1), the encodings JJJ uses
+		const auto ggg = getFieldValue<Cmpu_S1S2, Field_ggg>(op);
+		alu_cmpu(D, decode_JJJ_read_56(ggg, !D));
+	}
+
+	// CMPU compares two 48 bit unsigned operands: the accumulator extension takes no part, a 24 bit source arrives
+	// left-aligned from the decoder. E and U are unchanged; N is set with C, from the unsigned borrow, so that the
+	// signed branches after a CMPU act as unsigned ones (upstream dsp56300's reading of sim56300); V is cleared.
+	inline void DSP::alu_cmpu(const bool ab, const TReg56& _val)
+	{
+		// updateDirtyCCR() recomputes E, U and N together: resolve what the previous instruction left pending
+		// now, so that it does not overwrite the N written below.
+		updateDirtyCCR();
+
+		const TReg56& d = ab ? reg.b : reg.a;
+
+		constexpr uint64_t mask48 = 0x0000ffffffffffffull;
+		const uint64_t s2 = (static_cast<uint64_t>(d.var) >> g_aluShift) & mask48;
+		const uint64_t s1 = (static_cast<uint64_t>(_val.var) >> g_aluShift) & mask48;
+
+		sr_toggle(CCR_Z, ((s2 - s1) & mask48) == 0);
+		sr_toggle(CCRB_N, Bit(s1 > s2));
+		sr_clear(CCR_V);
+		sr_toggle(CCR_C, s1 > s2);
 	}
 	inline void DSP::op_Dec(const TWord op)
 	{
