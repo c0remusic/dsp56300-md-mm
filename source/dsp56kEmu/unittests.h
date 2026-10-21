@@ -127,6 +127,7 @@ namespace  dsp56k
 		void cmp_xxxx();
 		void subr();
 		void mpyi();
+		void macri();
 		void mpy_su();
 		void tst();
 		void nop();

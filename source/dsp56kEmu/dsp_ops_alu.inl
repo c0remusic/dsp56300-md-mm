@@ -1111,7 +1111,17 @@ namespace dsp56k
 	}
 	inline void DSP::op_Macri_xxxx(const TWord op)
 	{
-		errNotImplemented("MACRI");		
+		// MACRI (+/-)#xxxx,S,D  -  multiply-accumulate immediate with rounding.
+		// MACI (op_Maci_xxxx) plus the convergent rounding of the result, as MACR (op_Macr_S) is MAC plus alu_rnd.
+		const bool	ab		= getFieldValue<Macri_xxxx,Field_d>(op);
+		const bool	negate	= getFieldValue<Macri_xxxx,Field_k>(op);
+		const TWord qq		= getFieldValue<Macri_xxxx,Field_qq>(op);
+
+		const TReg24 s		= TReg24(immediateDataExt<Macri_xxxx>());
+		const TReg24 reg	= decode_qq_read(qq);
+
+		alu_mpy( ab, reg, s, negate, true );
+		alu_rnd( ab );
 	}
 	inline void DSP::op_Max(const TWord op)
 	{

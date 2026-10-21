@@ -1201,6 +1201,23 @@ namespace dsp56k
 		alu_mpy(ab, reg, s, negate, true, false, false, false);
 	}
 
+	void JitOps::op_Macri_xxxx(TWord op)
+	{
+		// MACRI (+/-)#xxxx,S,D  -  multiply-accumulate immediate with rounding: op_Maci_xxxx with the rounding flag of
+		// alu_mpy set, matching the interpreter's op_Macri_xxxx (alu_mpy accumulating + alu_rnd), as op_Mpyri is to op_Mpyi.
+		const bool	ab = getFieldValue<Macri_xxxx, Field_d>(op);
+		const bool	negate = getFieldValue<Macri_xxxx, Field_k>(op);
+		const TWord qq = getFieldValue<Macri_xxxx, Field_qq>(op);
+
+		DspValue s(m_block);
+		getSignedOpWordB(s);
+
+		DspValue reg(m_block);
+		decode_qq_read(reg, qq, true);
+
+		alu_mpy(ab, reg, s, negate, true, false, false, true);
+	}
+
 	void JitOps::op_Mpyi(TWord op)
 	{
 		const bool	ab = getFieldValue<Mpyi, Field_d>(op);

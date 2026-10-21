@@ -163,6 +163,7 @@ namespace dsp56k
 
 		// multiply
 		mpyi();
+		macri();
 		mpy_su();
 
 		// newly implemented
@@ -4024,6 +4025,55 @@ namespace dsp56k
 		}, [&]()
 		{
 			verify(dsp.aluA().var != 0);
+		});
+	}
+
+	void UnitTests::macri()
+	{
+		// MACI accumulates without rounding: $000001:812345 + 2 x $400000 x 2 = $000002:812345
+		runTest([&]()
+		{
+			dsp.setALU(false, TReg56(static_cast<TReg56::MyType>(0x00000001812345)));
+			dsp.x0(0x000002);
+			dsp.setSR(0x080000);
+			emit("maci #$400000,x0,a");
+		}, [&]()
+		{
+			verify(dsp.aluA().var == 0x00000002812345);
+		});
+
+		// MACRI the same, rounded: A0 above half carries into A1, A0 cleared
+		runTest([&]()
+		{
+			dsp.setALU(false, TReg56(static_cast<TReg56::MyType>(0x00000001812345)));
+			dsp.x0(0x000002);
+			dsp.setSR(0x080000);
+			emit("macri #$400000,x0,a");
+		}, [&]()
+		{
+			verify(dsp.aluA().var == 0x00000003000000);
+		});
+
+		// Convergent rounding on a tie (A0 exactly half): an odd B1 goes up to even, an even one stays
+		runTest([&]()
+		{
+			dsp.setALU(true, TReg56(static_cast<TReg56::MyType>(0x00000005800000)));
+			dsp.y0(0x000000);
+			dsp.setSR(0x080000);
+			emit("macri #$400000,y0,b");
+		}, [&]()
+		{
+			verify(dsp.aluB().var == 0x00000006000000);
+		});
+		runTest([&]()
+		{
+			dsp.setALU(true, TReg56(static_cast<TReg56::MyType>(0x00000004800000)));
+			dsp.y0(0x000000);
+			dsp.setSR(0x080000);
+			emit("macri #$400000,y0,b");
+		}, [&]()
+		{
+			verify(dsp.aluB().var == 0x00000004000000);
 		});
 	}
 
