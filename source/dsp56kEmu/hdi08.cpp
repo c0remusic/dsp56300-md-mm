@@ -455,6 +455,13 @@ namespace dsp56k
 		return m_dataTX.pop_front();
 	}
 
+	void HDI08::readTX(TWord* _out, const size_t _count)
+	{
+		if(!m_transmitDataAlwaysEmpty)
+			m_periph.setDelayCycles(0);
+		m_dataTX.pop_front(_count, [_out](const size_t _i, const TWord& _word) { _out[_i] = _word; });
+	}
+
 	void HDI08::writeTX(const TWord _val)
 	{
 		if(!m_transmitDataAlwaysEmpty && !m_dataTX.empty() && (!m_transmitDataBuffered || m_dataTX.full()))

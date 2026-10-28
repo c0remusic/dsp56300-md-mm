@@ -87,6 +87,8 @@ namespace dsp56k
 			return !m_dataTX.empty();
 		}
 		TWord readTX();
+		// _count words at once, with one semaphore round instead of one a word; waits for them as readTX does
+		void readTX(TWord* _out, size_t _count);
 		void writeTX(TWord _val);
 
 		uint32_t exec() noexcept;
