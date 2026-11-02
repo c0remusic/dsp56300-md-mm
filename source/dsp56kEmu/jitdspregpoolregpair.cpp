@@ -35,8 +35,9 @@ namespace dsp56k
 				// use dst as temp
 				replaceHigh(_dst, r64(regBase), r32(reg1));
 			}
-			m_pool.clearWritten(m_reg0);
-			m_pool.clearWritten(m_reg1);
+
+			// The partials stay written: the combined reg is a read cache that is never stored, so the partials are the
+			// only way their values reach the DSP when the block ends
 
 			asm_().mov(r64(_dst), r64(regBase));
 		}

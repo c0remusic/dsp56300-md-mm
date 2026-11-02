@@ -5006,6 +5006,7 @@ namespace dsp56k
 		rep_multi();
 		rep_div_powerOfTwo();
 		do_multi();
+		xy_partialsThenWhole();
 		jsr_rts();
 	}
 
@@ -5172,6 +5173,38 @@ namespace dsp56k
 		execUntil(0x101);
 
 		verify(dsp.aluA().var == 0x00000003000000);
+	}
+
+	void UnitTests::xy_partialsThenWhole()
+	{
+		// X1 and X0 written, then X read whole in the same block, and Y0 alone written, then Y read whole: the block's
+		// end has to store what was written. Machinedrum OS 1.63's TRX-SD voice does the first before a DO, and lost X.
+		dsp.resetHW();
+		dsp.x1(TReg24(0x111111));
+		dsp.x0(TReg24(0x000003));
+		dsp.y1(TReg24(0x777777));
+		dsp.y0(TReg24(0x000005));
+
+		TWord pc = 0x100;
+		pc = emitToMemory("jsr $200", pc);
+		const auto returnPC = pc;
+		emitToMemory("nop", pc);
+
+		pc = 0x200;
+		pc = emitToMemory("move #>$a5,x1", pc);
+		pc = emitToMemory("move #>$123456,x0", pc);
+		pc = emitToMemory("add x,b", pc);
+		pc = emitToMemory("move #>$654321,y0", pc);
+		pc = emitToMemory("add y,a", pc);
+		emitToMemory("rts", pc);
+
+		dsp.setPC(0x100);
+		execUntil(returnPC);
+
+		verify(dsp.x1() == 0x0000a5);
+		verify(dsp.x0() == 0x123456);
+		verify(dsp.y1() == 0x777777);
+		verify(dsp.y0() == 0x654321);
 	}
 
 	void UnitTests::jsr_rts()
