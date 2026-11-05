@@ -170,10 +170,37 @@ namespace dsp56k
 
 			Opcodes::getRegisters(written, read, opA, instA, instB);
 
+			// emit() emits a Rep and its body as one op, so they are analysed as one: nothing may end the block between
+			// them, or the block's next PC is the body, which then runs once more
+			const auto flags = Opcodes::getFlags(instA, instB);
+			const auto isRep = flags & (OpFlagRepDynamic | OpFlagRepImmediate);
+			const auto repLen = isRep ? Opcodes::getOpcodeLength(opA, instA, instB) : 0;
+
+			TWord bodyA = 0, bodyB = 0;
+			Instruction bodyInstA = InstructionCount, bodyInstB = InstructionCount;
+
+			if(isRep)
+			{
+				const auto bodyPc = pc + repLen;
+
+				if(numInstructions && (bodyPc >= pcMax || (bodyPc < _cache.size() && _cache[bodyPc].block)))
+				{
+					terminationReason = bodyPc >= pcMax ? JitBlockInfo::TerminationReason::PcMax : JitBlockInfo::TerminationReason::ExistingCode;
+					break;
+				}
+
+				_dsp.memory().getOpcode(bodyPc, bodyA, bodyB);
+				opcodes.getInstructionTypes(bodyA, bodyInstA, bodyInstB);
+
+				auto bodyWritten = RegisterMask::None;
+				auto bodyRead = RegisterMask::None;
+				Opcodes::getRegisters(bodyWritten, bodyRead, bodyA, bodyInstA, bodyInstB);
+				written |= bodyWritten;
+				read |= bodyRead;
+			}
+
 			const auto writtenM = (written & RegisterMask::M);
 			const auto readM = read & RegisterMask::M;
-
-			const auto flags = Opcodes::getFlags(instA, instB);
 
 			// a jsr in a fast interrupt modifies the MR because it disables scaling mode bits, loop flag and sixteen-bit arithmetic mode
 			if(isFastInterrupt && (written & RegisterMask::SSL) != RegisterMask::None)
@@ -209,15 +236,13 @@ namespace dsp56k
 
 			// for a volatile P address, if you have some code, break now. if not, generate this one op, and then return.
 			if (_volatileP.find(pc) != _volatileP.end() || 
-				(_volatileP.find(pc+1) != _volatileP.end() && Opcodes::getOpcodeLength(opA, instA, instB) == 2))
+				(_volatileP.find(pc+1) != _volatileP.end() && (isRep || Opcodes::getOpcodeLength(opA, instA, instB) == 2)))
 			{
 				terminationReason = JitBlockInfo::TerminationReason::VolatileP;
 				if (numInstructions)
 					break;
 				shouldEmit = false;
 			}
-
-			const auto isRep = flags & (OpFlagRepDynamic | OpFlagRepImmediate);
 
 			writtenRegs |= written;
 			readRegs |= read;
@@ -256,6 +281,13 @@ namespace dsp56k
 			numWords += opLen;
 			++numInstructions;
 			numCycles += calcCycles(instA, instB, pc, opA, _dsp.memory().getBridgedMemoryAddress(), 1);
+
+			if(isRep)
+			{
+				numWords += Opcodes::getOpcodeLength(bodyA, bodyInstA, bodyInstB);
+				++numInstructions;
+				numCycles += calcCycles(bodyInstA, bodyInstB, pc + repLen, bodyA, _dsp.memory().getBridgedMemoryAddress(), 1);
+			}
 
 			if(getLoopEndAddr(_info.loopEnd, instA, pc, opB))
 				_info.loopBegin = pc;
@@ -301,7 +333,8 @@ namespace dsp56k
 				break;
 			}
 
-			if(writesToPMemory(instA, opA) || writesToPMemory(instB, opA))
+			if(writesToPMemory(instA, opA) || writesToPMemory(instB, opA) ||
+				(isRep && (writesToPMemory(bodyInstA, bodyA) || writesToPMemory(bodyInstB, bodyA))))
 			{
 				terminationReason = JitBlockInfo::TerminationReason::WritePMem;
 				break;
@@ -562,6 +595,7 @@ namespace dsp56k
 			ccrOverwrite |= ccrO;
 		}
 
+		assert(pMemSize == info.memSize);
 		assert(_rt.getEncodedCycleCount() >= _rt.getEncodedInstructionCount());
 
 		if(pollLoop)
